@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, useMemo } from 'react';
 import {
   BarChart,
   Bar,
@@ -18,31 +18,80 @@ import {
   Cell,
   ResponsiveContainer,
 } from 'recharts';
-import { Download, Image as ImageIcon, FileText } from 'lucide-react';
+import { Image as ImageIcon, FileText, Loader } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
-import { ChartType, ChartDataField, ChartConfig } from '../types/chart';
+import { ChartConfiguration } from '../types/chart';
+import { RawDataResponse } from '../services/api';
 
 interface ChartPreviewProps {
-  chartType: ChartType;
-  xAxisFields: ChartDataField[];
-  yAxisFields: ChartDataField[];
-  valueFields: ChartDataField[];
-  config: ChartConfig;
-  data: Record<string, unknown>[];
+  config: ChartConfiguration;
+  rawData: RawDataResponse | null;
+  isLoading?: boolean;
 }
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
 
 export default function ChartPreview({
-  chartType,
-  xAxisFields,
-  yAxisFields,
-  valueFields,
   config,
-  data,
+  rawData,
+  isLoading = false,
 }: ChartPreviewProps) {
   const chartRef = useRef<HTMLDivElement>(null);
+
+  // Process raw data for chart consumption
+  const processedData = useMemo(() => {
+    if (!rawData || !rawData.items.length) return [];
+
+    const xAxisField = config.data_fields.find(df => df.axis === 'x');
+    const yAxisFields = config.data_fields.filter(df => df.axis === 'y');
+    const valueField = config.data_fields.find(df => df.axis === 'value');
+
+    if (!xAxisField && !valueField) return [];
+
+    // For pie charts, we need to aggregate data by the x-axis field
+    if (config.chart_type === 'pie' && xAxisField && valueField) {
+      const aggregated = rawData.items.reduce((acc, item) => {
+        const key = item[xAxisField.field.id] || 'Unknown';
+        const value = Number(item[valueField.field.id]) || 0;
+        
+        if (acc[key]) {
+          acc[key] += value;
+        } else {
+          acc[key] = value;
+        }
+        
+        return acc;
+      }, {} as Record<string, number>);
+
+      return Object.entries(aggregated).map(([name, value]) => ({
+        name,
+        value,
+        [xAxisField.field.id]: name,
+        [valueField.field.id]: value,
+      }));
+    }
+
+    // For other chart types, process data directly
+    return rawData.items.map(item => {
+      const processedItem: Record<string, unknown> = {};
+      
+      // Add x-axis field
+      if (xAxisField) {
+        processedItem[xAxisField.field.id] = item[xAxisField.field.id];
+        processedItem[xAxisField.field.name] = item[xAxisField.field.id];
+      }
+      
+      // Add y-axis fields
+      yAxisFields.forEach(yField => {
+        const value = item[yField.field.id];
+        processedItem[yField.field.id] = typeof value === 'number' ? value : Number(value) || 0;
+        processedItem[yField.field.name] = typeof value === 'number' ? value : Number(value) || 0;
+      });
+      
+      return processedItem;
+    });
+  }, [rawData, config.data_fields, config.chart_type]);
 
   const exportToPNG = async () => {
     if (!chartRef.current) return;
@@ -53,7 +102,7 @@ export default function ChartPreview({
     });
 
     const link = document.createElement('a');
-    link.download = `chart-${Date.now()}.png`;
+    link.download = `${config.name || 'chart'}-${Date.now()}.png`;
     link.href = canvas.toDataURL('image/png');
     link.click();
   };
@@ -74,55 +123,72 @@ export default function ChartPreview({
     });
 
     pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
-    pdf.save(`chart-${Date.now()}.pdf`);
+    pdf.save(`${config.name || 'chart'}-${Date.now()}.pdf`);
   };
 
-  const xDataKey = xAxisFields[0]?.field.name;
-  const yDataKey = yAxisFields[0]?.field.name;
-  const valueDataKey = valueFields[0]?.field.name;
+  const xAxisField = config.data_fields.find(df => df.axis === 'x');
+  const yAxisFields = config.data_fields.filter(df => df.axis === 'y');
+  const valueField = config.data_fields.find(df => df.axis === 'value');
 
-  const hasData = data.length > 0;
+  const hasData = processedData.length > 0;
   const canRenderChart =
-    (chartType === 'pie' && valueDataKey && hasData) ||
-    (chartType !== 'pie' && xDataKey && yDataKey && hasData);
+    (config.chart_type === 'pie' && valueField && hasData) ||
+    (config.chart_type !== 'pie' && xAxisField && yAxisFields.length > 0 && hasData);
 
   const renderChart = () => {
-    if (!canRenderChart) {
+    if (isLoading) {
       return (
         <div className="h-full flex items-center justify-center text-gray-400">
           <div className="text-center">
-            <p className="text-lg font-medium">No data to display</p>
-            <p className="text-sm mt-1">Configure your chart fields to see a preview</p>
+            <Loader className="w-8 h-8 animate-spin mx-auto mb-2" />
+            <p className="text-lg font-medium">Loading data...</p>
           </div>
         </div>
       );
     }
 
-    const chartColors = config.colors || COLORS;
+    if (!canRenderChart) {
+      return (
+        <div className="h-full flex items-center justify-center text-gray-400">
+          <div className="text-center">
+            <p className="text-lg font-medium">No data to display</p>
+            <p className="text-sm mt-1">
+              {!hasData 
+                ? 'Load data first by clicking "Refresh Data"'
+                : 'Configure your chart fields to see a preview'
+              }
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    const chartColors = config.config.colors || COLORS;
     const commonProps = {
-      data,
+      data: processedData,
       margin: { top: 20, right: 30, left: 20, bottom: 20 },
     };
 
-    switch (chartType) {
+    switch (config.chart_type) {
       case 'bar':
         return (
           <ResponsiveContainer width="100%" height="100%">
             <BarChart {...commonProps}>
-              {config.showGrid && <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />}
+              {config.config.showGrid && <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />}
               <XAxis
-                dataKey={xDataKey}
-                label={config.xAxisLabel ? { value: config.xAxisLabel, position: 'insideBottom', offset: -10 } : undefined}
+                dataKey={xAxisField?.field.id}
+                label={config.config.xAxisLabel ? { value: config.config.xAxisLabel, position: 'insideBottom', offset: -10 } : undefined}
               />
               <YAxis
-                label={config.yAxisLabel ? { value: config.yAxisLabel, angle: -90, position: 'insideLeft' } : undefined}
+                label={config.config.yAxisLabel ? { value: config.config.yAxisLabel, angle: -90, position: 'insideLeft' } : undefined}
               />
               <Tooltip />
-              {config.showLegend && <Legend />}
+              {config.config.showLegend && <Legend />}
               {yAxisFields.map((field, index) => (
                 <Bar
                   key={field.field.id}
-                  dataKey={field.field.name}
+                  dataKey={field.field.id}
+                  name={field.field.name}
                   fill={chartColors[index % chartColors.length]}
                 />
               ))}
@@ -134,21 +200,22 @@ export default function ChartPreview({
         return (
           <ResponsiveContainer width="100%" height="100%">
             <LineChart {...commonProps}>
-              {config.showGrid && <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />}
+              {config.config.showGrid && <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />}
               <XAxis
-                dataKey={xDataKey}
-                label={config.xAxisLabel ? { value: config.xAxisLabel, position: 'insideBottom', offset: -10 } : undefined}
+                dataKey={xAxisField?.field.id}
+                label={config.config.xAxisLabel ? { value: config.config.xAxisLabel, position: 'insideBottom', offset: -10 } : undefined}
               />
               <YAxis
-                label={config.yAxisLabel ? { value: config.yAxisLabel, angle: -90, position: 'insideLeft' } : undefined}
+                label={config.config.yAxisLabel ? { value: config.config.yAxisLabel, angle: -90, position: 'insideLeft' } : undefined}
               />
               <Tooltip />
-              {config.showLegend && <Legend />}
+              {config.config.showLegend && <Legend />}
               {yAxisFields.map((field, index) => (
                 <Line
                   key={field.field.id}
                   type="monotone"
-                  dataKey={field.field.name}
+                  dataKey={field.field.id}
+                  name={field.field.name}
                   stroke={chartColors[index % chartColors.length]}
                   strokeWidth={2}
                 />
@@ -161,21 +228,22 @@ export default function ChartPreview({
         return (
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart {...commonProps}>
-              {config.showGrid && <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />}
+              {config.config.showGrid && <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />}
               <XAxis
-                dataKey={xDataKey}
-                label={config.xAxisLabel ? { value: config.xAxisLabel, position: 'insideBottom', offset: -10 } : undefined}
+                dataKey={xAxisField?.field.id}
+                label={config.config.xAxisLabel ? { value: config.config.xAxisLabel, position: 'insideBottom', offset: -10 } : undefined}
               />
               <YAxis
-                label={config.yAxisLabel ? { value: config.yAxisLabel, angle: -90, position: 'insideLeft' } : undefined}
+                label={config.config.yAxisLabel ? { value: config.config.yAxisLabel, angle: -90, position: 'insideLeft' } : undefined}
               />
               <Tooltip />
-              {config.showLegend && <Legend />}
+              {config.config.showLegend && <Legend />}
               {yAxisFields.map((field, index) => (
                 <Area
                   key={field.field.id}
                   type="monotone"
-                  dataKey={field.field.name}
+                  dataKey={field.field.id}
+                  name={field.field.name}
                   fill={chartColors[index % chartColors.length]}
                   stroke={chartColors[index % chartColors.length]}
                 />
@@ -189,42 +257,47 @@ export default function ChartPreview({
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
               <Pie
-                data={data}
-                dataKey={valueDataKey}
-                nameKey={xDataKey}
+                data={processedData}
+                dataKey={valueField?.field.id}
+                nameKey={xAxisField?.field.id}
                 cx="50%"
                 cy="50%"
                 outerRadius={150}
-                label
+                label={({ name, value }) => `${name}: ${value}`}
               >
-                {data.map((_, index) => (
+                {processedData.map((_, index) => (
                   <Cell key={`cell-${index}`} fill={chartColors[index % chartColors.length]} />
                 ))}
               </Pie>
               <Tooltip />
-              {config.showLegend && <Legend />}
+              {config.config.showLegend && <Legend />}
             </PieChart>
           </ResponsiveContainer>
         );
 
       case 'scatter':
+        const xField = xAxisField?.field.id;
+        const yField = yAxisFields[0]?.field.id;
+        
         return (
           <ResponsiveContainer width="100%" height="100%">
             <ScatterChart {...commonProps}>
-              {config.showGrid && <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />}
+              {config.config.showGrid && <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />}
               <XAxis
-                dataKey={xDataKey}
-                label={config.xAxisLabel ? { value: config.xAxisLabel, position: 'insideBottom', offset: -10 } : undefined}
+                dataKey={xField}
+                type="number"
+                label={config.config.xAxisLabel ? { value: config.config.xAxisLabel, position: 'insideBottom', offset: -10 } : undefined}
               />
               <YAxis
-                dataKey={yDataKey}
-                label={config.yAxisLabel ? { value: config.yAxisLabel, angle: -90, position: 'insideLeft' } : undefined}
+                dataKey={yField}
+                type="number"
+                label={config.config.yAxisLabel ? { value: config.config.yAxisLabel, angle: -90, position: 'insideLeft' } : undefined}
               />
               <Tooltip cursor={{ strokeDasharray: '3 3' }} />
-              {config.showLegend && <Legend />}
+              {config.config.showLegend && <Legend />}
               <Scatter
-                name="Data"
-                data={data}
+                name="Data Points"
+                data={processedData}
                 fill={chartColors[0]}
               />
             </ScatterChart>
@@ -241,14 +314,16 @@ export default function ChartPreview({
       <div className="p-4 border-b border-gray-200 flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold text-gray-900">
-            {config.title || 'Chart Preview'}
+            {config.config.title || config.name || 'Chart Preview'}
           </h2>
-          <p className="text-sm text-gray-600 mt-0.5">Real-time visualization</p>
+          <p className="text-sm text-gray-600 mt-0.5">
+            {processedData.length > 0 ? `${processedData.length} data points` : 'No data'}
+          </p>
         </div>
         <div className="flex gap-2">
           <button
             onClick={exportToPNG}
-            disabled={!canRenderChart}
+            disabled={!canRenderChart || isLoading}
             className="flex items-center gap-2 px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
             title="Export as PNG"
           >
@@ -257,7 +332,7 @@ export default function ChartPreview({
           </button>
           <button
             onClick={exportToPDF}
-            disabled={!canRenderChart}
+            disabled={!canRenderChart || isLoading}
             className="flex items-center gap-2 px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
             title="Export as PDF"
           >
@@ -267,7 +342,7 @@ export default function ChartPreview({
         </div>
       </div>
 
-      <div ref={chartRef} className="flex-1 p-6 bg-white">
+      <div ref={chartRef} className="flex-1 p-6 bg-white min-h-[400px]">
         {renderChart()}
       </div>
     </div>

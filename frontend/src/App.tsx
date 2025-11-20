@@ -1,187 +1,221 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { DragDropContext, DropResult } from 'react-beautiful-dnd';
-import { BarChart3 } from 'lucide-react';
-import DataFieldsPanel from './components/DataFieldsPanel';
+import { Toaster } from 'react-hot-toast';
 import ChartBuilder from './components/ChartBuilder';
-import ChartConfigPanel from './components/ChartConfigPanel';
-import ChartPreview from './components/ChartPreview';
-import SaveLoadPanel from './components/SaveLoadPanel';
-import { ChartType, ChartDataField, ChartConfig, ChartConfiguration, DataField } from './types/chart';
-import { sampleDataFields, generateSampleData } from './utils/sampleData';
+import DataFieldsPanel from './components/DataFieldsPanel';
+import { DateRangeSelector } from './components/DateRangeSelector';
+import { ApiStatus } from './components/ApiStatus';
+import { useFlowData } from './hooks/useFlowData';
+import { ChartConfiguration, DateRange } from './types/chart';
 
 function App() {
-  const [chartType, setChartType] = useState<ChartType>('bar');
-  const [xAxisFields, setXAxisFields] = useState<ChartDataField[]>([]);
-  const [yAxisFields, setYAxisFields] = useState<ChartDataField[]>([]);
-  const [valueFields, setValueFields] = useState<ChartDataField[]>([]);
-  const [config, setConfig] = useState<ChartConfig>({
-    showLegend: true,
-    showGrid: true,
+  const {
+    rawData,
+    availableFields,
+    apiStatus,
+    fetchRawData,
+    fetchDataFields,
+    refreshConnection,
+  } = useFlowData();
+
+  const [dateRange, setDateRange] = useState<DateRange>(() => {
+    const end = new Date();
+    const start = new Date();
+    start.setMonth(start.getMonth() - 3); // Default to last 3 months
+    
+    return {
+      start_date: start.toISOString().split('T')[0],
+      end_date: end.toISOString().split('T')[0],
+    };
   });
-  const [rawData] = useState(generateSampleData());
-  const [savedConfigs, setSavedConfigs] = useState<ChartConfiguration[]>([]);
 
+  const [chartConfig, setChartConfig] = useState<ChartConfiguration>({
+    name: 'New Chart',
+    chart_type: 'bar',
+    data_fields: [],
+    filters: [],
+    config: {
+      showLegend: true,
+      showGrid: true,
+      colors: ['#3B82F6', '#EF4444', '#10B981', '#F59E0B', '#8B5CF6'],
+    },
+  });
+
+  // Load initial data when API is connected
   useEffect(() => {
-    const saved = localStorage.getItem('chartConfigs');
-    if (saved) {
-      setSavedConfigs(JSON.parse(saved));
+    if (apiStatus.isConnected && !apiStatus.isLoading) {
+      handleRefreshData();
     }
-  }, []);
+  }, [apiStatus.isConnected]);
 
-  const onDragEnd = (result: DropResult) => {
-    const { source, destination } = result;
+  const handleRefreshData = async () => {
+    try {
+      // Fetch available fields first
+      await fetchDataFields(dateRange);
+      
+      // Then fetch raw data
+      await fetchRawData({
+        ...dateRange,
+        page: 1,
+        items_per_page: 100, // Get more data for better charts
+      });
+    } catch (error) {
+      console.error('Failed to refresh data:', error);
+    }
+  };
+
+  const handleDateRangeChange = (newDateRange: DateRange) => {
+    setDateRange(newDateRange);
+  };
+
+  const handleDragEnd = (result: DropResult) => {
+    const { destination, source, draggableId } = result;
 
     if (!destination) return;
-    if (source.droppableId === destination.droppableId && source.index === destination.index) {
-      return;
+
+    // Handle drag from available fields to chart builder
+    if (source.droppableId === 'available-fields' && 
+        (destination.droppableId === 'x-axis' || 
+         destination.droppableId === 'y-axis' || 
+         destination.droppableId === 'value-axis')) {
+      
+      const field = availableFields.find(f => f.id === draggableId);
+      if (!field) return;
+
+      const axis = destination.droppableId.replace('-axis', '') as 'x' | 'y' | 'value';
+      
+      // Remove any existing field from the same axis
+      const updatedFields = chartConfig.data_fields.filter(df => df.axis !== axis);
+      
+      // Add the new field
+      updatedFields.push({ field, axis });
+      
+      setChartConfig(prev => ({
+        ...prev,
+        data_fields: updatedFields,
+      }));
     }
 
-    const sourceFieldId = result.draggableId.replace(/^(x-|y-|value-)/, '');
-    const field = sampleDataFields.find((f) => f.id === sourceFieldId);
-    if (!field) return;
-
-    const newField: ChartDataField = {
-      field,
-      axis: destination.droppableId === 'x-axis' ? 'x' :
-            destination.droppableId === 'y-axis' ? 'y' : 'value',
-    };
-
-    if (source.droppableId === 'available-fields') {
-      if (destination.droppableId === 'x-axis') {
-        setXAxisFields([...xAxisFields, newField]);
-      } else if (destination.droppableId === 'y-axis') {
-        setYAxisFields([...yAxisFields, newField]);
-      } else if (destination.droppableId === 'value') {
-        setValueFields([...valueFields, newField]);
+    // Handle reordering within chart builder
+    if (source.droppableId === destination.droppableId && 
+        source.droppableId !== 'available-fields') {
+      
+      const axis = source.droppableId.replace('-axis', '') as 'x' | 'y' | 'value';
+      const fieldsForAxis = chartConfig.data_fields.filter(df => df.axis === axis);
+      
+      if (fieldsForAxis.length > 1) {
+        const [reorderedField] = fieldsForAxis.splice(source.index, 1);
+        fieldsForAxis.splice(destination.index, 0, reorderedField);
+        
+        const otherFields = chartConfig.data_fields.filter(df => df.axis !== axis);
+        
+        setChartConfig(prev => ({
+          ...prev,
+          data_fields: [...otherFields, ...fieldsForAxis],
+        }));
       }
-    } else {
-      const sourceList =
-        source.droppableId === 'x-axis' ? xAxisFields :
-        source.droppableId === 'y-axis' ? yAxisFields : valueFields;
-
-      const destList =
-        destination.droppableId === 'x-axis' ? [...xAxisFields] :
-        destination.droppableId === 'y-axis' ? [...yAxisFields] : [...valueFields];
-
-      const [removed] = sourceList.splice(source.index, 1);
-      destList.splice(destination.index, 0, removed);
-
-      if (source.droppableId === 'x-axis') setXAxisFields(sourceList);
-      else if (source.droppableId === 'y-axis') setYAxisFields(sourceList);
-      else setValueFields(sourceList);
-
-      if (destination.droppableId === 'x-axis') setXAxisFields(destList);
-      else if (destination.droppableId === 'y-axis') setYAxisFields(destList);
-      else setValueFields(destList);
     }
   };
 
-  const removeField = (axis: 'x' | 'y' | 'value', index: number) => {
-    if (axis === 'x') {
-      setXAxisFields(xAxisFields.filter((_, i) => i !== index));
-    } else if (axis === 'y') {
-      setYAxisFields(yAxisFields.filter((_, i) => i !== index));
-    } else {
-      setValueFields(valueFields.filter((_, i) => i !== index));
-    }
-  };
-
-  const handleSaveConfig = (name: string, description?: string) => {
-    const newConfig: ChartConfiguration = {
-      id: Date.now().toString(),
-      name,
-      description,
-      chart_type: chartType,
-      data_fields: [...xAxisFields, ...yAxisFields, ...valueFields],
-      filters: [],
-      config,
-    };
-
-    const updated = [...savedConfigs, newConfig];
-    setSavedConfigs(updated);
-    localStorage.setItem('chartConfigs', JSON.stringify(updated));
-  };
-
-  const handleLoadConfig = (savedConfig: ChartConfiguration) => {
-    setChartType(savedConfig.chart_type);
-    setXAxisFields(savedConfig.data_fields.filter((f) => f.axis === 'x'));
-    setYAxisFields(savedConfig.data_fields.filter((f) => f.axis === 'y'));
-    setValueFields(savedConfig.data_fields.filter((f) => f.axis === 'value'));
-    setConfig(savedConfig.config);
-  };
-
-  const handleDeleteConfig = (id: string) => {
-    const updated = savedConfigs.filter((c) => c.id !== id);
-    setSavedConfigs(updated);
-    localStorage.setItem('chartConfigs', JSON.stringify(updated));
+  const handleRemoveField = (fieldId: string, axis: 'x' | 'y' | 'value') => {
+    setChartConfig(prev => ({
+      ...prev,
+      data_fields: prev.data_fields.filter(df => !(df.field.id === fieldId && df.axis === axis)),
+    }));
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
-      <header className="bg-white border-b border-gray-200 shadow-sm">
-        <div className="max-w-[1800px] mx-auto px-6 py-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-blue-600 rounded-lg">
-              <BarChart3 className="w-6 h-6 text-white" />
-            </div>
+    <div className="min-h-screen bg-gray-50">
+      <Toaster position="top-right" />
+      
+      {/* Header */}
+      <header className="bg-white shadow-sm border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">Challenge XYZ</h1>
-              <p className="text-sm text-gray-600">Chart Customization Platform</p>
+              <h1 className="text-2xl font-bold text-gray-900">Flow Ops Chart Builder</h1>
+              <p className="text-sm text-gray-600 mt-1">
+                Create custom charts from your Flow productivity data
+              </p>
             </div>
           </div>
         </div>
       </header>
 
-      <main className="max-w-[1800px] mx-auto px-6 py-6">
-        <DragDropContext onDragEnd={onDragEnd}>
-          <div className="grid grid-cols-12 gap-6">
-            <div className="col-span-3 space-y-6">
-              <DataFieldsPanel fields={sampleDataFields} />
-              <SaveLoadPanel
-                currentConfig={{
-                  name: '',
-                  chart_type: chartType,
-                  data_fields: [...xAxisFields, ...yAxisFields, ...valueFields],
-                  filters: [],
-                  config,
-                }}
-                savedConfigs={savedConfigs}
-                onSave={handleSaveConfig}
-                onLoad={handleLoadConfig}
-                onDelete={handleDeleteConfig}
-              />
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {/* API Status */}
+        <div className="mb-6">
+          <ApiStatus status={apiStatus} onRetry={refreshConnection} />
+        </div>
+
+        {/* Date Range Selector */}
+        <div className="mb-6">
+          <DateRangeSelector
+            dateRange={dateRange}
+            onDateRangeChange={handleDateRangeChange}
+            onRefresh={handleRefreshData}
+            isLoading={apiStatus.isLoading}
+          />
+        </div>
+
+        {/* Main Content */}
+        <DragDropContext onDragEnd={handleDragEnd}>
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            {/* Data Fields Panel */}
+            <div className="lg:col-span-1">
+              <DataFieldsPanel fields={availableFields} />
             </div>
 
-            <div className="col-span-9 space-y-6">
-              <ChartConfigPanel
-                chartType={chartType}
-                config={config}
-                onChartTypeChange={setChartType}
-                onConfigChange={(newConfig) => setConfig({ ...config, ...newConfig })}
-              />
-
+            {/* Chart Builder */}
+            <div className="lg:col-span-3">
               <ChartBuilder
-                chartType={chartType}
-                xAxisFields={xAxisFields}
-                yAxisFields={yAxisFields}
-                valueFields={valueFields}
-                onRemoveField={removeField}
+                config={chartConfig}
+                onConfigChange={setChartConfig}
+                onRemoveField={handleRemoveField}
+                rawData={rawData}
+                isLoading={apiStatus.isLoading}
               />
-
-              <div className="h-[500px]">
-                <ChartPreview
-                  chartType={chartType}
-                  xAxisFields={xAxisFields}
-                  yAxisFields={yAxisFields}
-                  valueFields={valueFields}
-                  config={config}
-                  data={rawData}
-                />
-              </div>
             </div>
           </div>
         </DragDropContext>
-      </main>
+
+        {/* Data Summary */}
+        {rawData && (
+          <div className="mt-6 bg-white p-4 rounded-lg shadow-sm border border-gray-200">
+            <h3 className="text-lg font-semibold text-gray-800 mb-2">Data Summary</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+              <div>
+                <span className="text-gray-600">Total Items:</span>
+                <span className="ml-2 font-medium">{rawData.total_items}</span>
+              </div>
+              <div>
+                <span className="text-gray-600">Current Page:</span>
+                <span className="ml-2 font-medium">{rawData.page} of {rawData.total_pages || 1}</span>
+              </div>
+              <div>
+                <span className="text-gray-600">Items Loaded:</span>
+                <span className="ml-2 font-medium">{rawData.items.length}</span>
+              </div>
+              <div>
+                <span className="text-gray-600">Available Fields:</span>
+                <span className="ml-2 font-medium">{availableFields.length}</span>
+              </div>
+            </div>
+            
+            {/* Sample Data Preview */}
+            {rawData.items.length > 0 && (
+              <div className="mt-4">
+                <h4 className="text-sm font-medium text-gray-700 mb-2">Sample Data:</h4>
+                <div className="bg-gray-50 p-3 rounded-md overflow-x-auto">
+                  <pre className="text-xs text-gray-600">
+                    {JSON.stringify(rawData.items[0], null, 2)}
+                  </pre>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

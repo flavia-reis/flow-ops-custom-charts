@@ -29,13 +29,24 @@ export default function DataFieldsPanel({ fields }: DataFieldsPanelProps) {
       </div>
 
       <Droppable droppableId="available-fields" isDropDisabled={true}>
-        {(provided) => (
+        {(provided, snapshot) => (
           <div
             ref={provided.innerRef}
             {...provided.droppableProps}
             className="flex-1 overflow-y-auto p-4"
+            style={{
+              backgroundColor: snapshot.isDraggingOver ? '#f0f9ff' : 'transparent'
+            }}
           >
             <div className="space-y-2">
+              {fields.length === 0 && (
+                <div className="text-center py-8 text-gray-400">
+                  <Database className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                  <p className="text-sm">No fields available</p>
+                  <p className="text-xs mt-1">Load data first to see available fields</p>
+                </div>
+              )}
+              
               {fields.map((field, index) => (
                 <Draggable key={field.id} draggableId={field.id} index={index}>
                   {(provided, snapshot) => (
@@ -49,6 +60,14 @@ export default function DataFieldsPanel({ fields }: DataFieldsPanelProps) {
                             ? 'bg-blue-50 border-blue-300 shadow-lg'
                             : 'bg-gray-50 border-gray-200 hover:bg-gray-100'
                         }`}
+                        style={{
+                          userSelect: 'none',
+                          WebkitUserSelect: 'none',
+                          MozUserSelect: 'none',
+                          msUserSelect: 'none',
+                          touchAction: 'none',
+                          ...provided.draggableProps.style
+                        }}
                       >
                         <div className="flex items-center gap-2">
                           <div className={`${

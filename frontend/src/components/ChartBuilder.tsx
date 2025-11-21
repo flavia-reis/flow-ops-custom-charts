@@ -1,5 +1,5 @@
 import React from 'react';
-import { Droppable, Draggable } from 'react-beautiful-dnd';
+import { useDroppable, useDraggable } from '@dnd-kit/core';
 import { X, Hash, Calendar, Type, BarChart3 } from 'lucide-react';
 import { ChartConfiguration, ChartType } from '../types/chart';
 import { RawDataResponse } from '../services/api';
@@ -33,6 +33,127 @@ const chartTypeOptions: { value: ChartType; label: string }[] = [
   { value: 'pie', label: 'Pie Chart' },
   { value: 'scatter', label: 'Scatter Plot' },
 ];
+
+function DroppableAxis({ 
+  id, 
+  title, 
+  description, 
+  fields, 
+  axis, 
+  onRemoveField 
+}: {
+  id: string;
+  title: string;
+  description: string;
+  fields: any[];
+  axis: 'x' | 'y' | 'value';
+  onRemoveField: (fieldId: string, axis: 'x' | 'y' | 'value') => void;
+}) {
+  const { isOver, setNodeRef } = useDroppable({
+    id,
+    data: {
+      type: 'axis',
+      axis: axis,
+    },
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`border-2 border-dashed rounded-lg p-4 min-h-[80px] transition-colors ${
+        isOver
+          ? 'border-blue-400 bg-blue-50'
+          : 'border-gray-300 bg-gray-50'
+      }`}
+    >
+      <p className="text-sm font-medium text-gray-700 mb-3">{title}</p>
+      <p className="text-xs text-gray-500 mb-2">{description}</p>
+      
+      <div className="space-y-2">
+        {fields.length === 0 && (
+          <p className="text-sm text-gray-400 italic py-4 text-center">
+            {isOver ? 'Drop here!' : `Drop a field here for ${title.toLowerCase()}`}
+          </p>
+        )}
+        
+        {fields.map((item, index) => (
+          <DraggableAxisField
+            key={`${axis}-${item.field.id}`}
+            item={item}
+            axis={axis}
+            index={index}
+            onRemoveField={onRemoveField}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DraggableAxisField({ 
+  item, 
+  axis, 
+  index, 
+  onRemoveField 
+}: {
+  item: any;
+  axis: 'x' | 'y' | 'value';
+  index: number;
+  onRemoveField: (fieldId: string, axis: 'x' | 'y' | 'value') => void;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    isDragging,
+  } = useDraggable({
+    id: `${axis}-${item.field.id}`,
+    data: {
+      type: 'axis-field',
+      field: item.field,
+      axis: axis,
+    },
+  });
+
+  const style = transform ? {
+    transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
+  } : undefined;
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...listeners}
+      {...attributes}
+      className={`flex items-center gap-3 bg-white border rounded-lg px-3 py-2 shadow-sm transition-all ${
+        isDragging 
+          ? 'border-blue-300 shadow-lg opacity-50' 
+          : 'border-gray-200 hover:border-gray-300'
+      }`}
+    >
+      <div className={`${
+        item.field.type === 'number' ? 'text-green-600' :
+        item.field.type === 'date' ? 'text-purple-600' :
+        'text-gray-600'
+      }`}>
+        {getFieldIcon(item.field.type)}
+      </div>
+      <span className="text-sm flex-1 truncate font-medium">{item.field.name}</span>
+      <span className="text-xs text-gray-500 capitalize">{item.field.type}</span>
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onRemoveField(item.field.id, axis);
+        }}
+        className="text-gray-400 hover:text-red-600 transition-colors p-1"
+        title="Remove field"
+      >
+        <X className="w-4 h-4" />
+      </button>
+    </div>
+  );
+}
 
 export default function ChartBuilder({
   config,
@@ -96,195 +217,36 @@ export default function ChartBuilder({
         
         <div className="space-y-4">
           {showXAxis && (
-            <Droppable droppableId="x-axis">
-              {(provided, snapshot) => (
-                <div
-                  ref={provided.innerRef}
-                  {...provided.droppableProps}
-                  className={`border-2 border-dashed rounded-lg p-4 min-h-[80px] transition-colors ${
-                    snapshot.isDraggingOver
-                      ? 'border-blue-400 bg-blue-50'
-                      : 'border-gray-300 bg-gray-50'
-                  }`}
-                >
-                  <p className="text-sm font-medium text-gray-700 mb-3">X-Axis (Categories)</p>
-                  <div className="space-y-2">
-                    {xAxisFields.length === 0 && (
-                      <p className="text-sm text-gray-400 italic">Drop a field here for X-axis</p>
-                    )}
-                    {xAxisFields.map((item, index) => (
-                      <Draggable
-                        key={`x-${item.field.id}`}
-                        draggableId={`x-${item.field.id}`}
-                        index={index}
-                      >
-                        {(provided, snapshot) => (
-                          <div
-                            ref={provided.innerRef}
-                            {...provided.draggableProps}
-                            {...provided.dragHandleProps}
-                            className="flex items-center gap-3 bg-white border border-gray-200 rounded-lg px-3 py-2 shadow-sm"
-                            style={{
-                              userSelect: 'none',
-                              WebkitUserSelect: 'none',
-                              MozUserSelect: 'none',
-                              msUserSelect: 'none',
-                              touchAction: 'none',
-                              ...provided.draggableProps.style
-                            }}
-                          >
-                            <div className={`${
-                              item.field.type === 'number' ? 'text-green-600' :
-                              item.field.type === 'date' ? 'text-purple-600' :
-                              'text-gray-600'
-                            }`}>
-                              {getFieldIcon(item.field.type)}
-                            </div>
-                            <span className="text-sm flex-1 truncate font-medium">{item.field.name}</span>
-                            <span className="text-xs text-gray-500 capitalize">{item.field.type}</span>
-                            <button
-                              onClick={() => onRemoveField(item.field.id, 'x')}
-                              className="text-gray-400 hover:text-red-600 transition-colors"
-                            >
-                              <X className="w-4 h-4" />
-                            </button>
-                          </div>
-                        )}
-                      </Draggable>
-                    ))}
-                  </div>
-                  {provided.placeholder}
-                </div>
-              )}
-            </Droppable>
+            <DroppableAxis
+              id="x-axis"
+              title="X-Axis (Categories)"
+              description="Drop a field here to use as categories on the X-axis"
+              fields={xAxisFields}
+              axis="x"
+              onRemoveField={onRemoveField}
+            />
           )}
 
           {showYAxis && (
-            <Droppable droppableId="y-axis">
-              {(provided, snapshot) => (
-                <div
-                  ref={provided.innerRef}
-                  {...provided.droppableProps}
-                  className={`border-2 border-dashed rounded-lg p-4 min-h-[80px] transition-colors ${
-                    snapshot.isDraggingOver
-                      ? 'border-blue-400 bg-blue-50'
-                      : 'border-gray-300 bg-gray-50'
-                  }`}
-                >
-                  <p className="text-sm font-medium text-gray-700 mb-3">Y-Axis (Values)</p>
-                  <div className="space-y-2">
-                    {yAxisFields.length === 0 && (
-                      <p className="text-sm text-gray-400 italic">Drop a numeric field here for Y-axis</p>
-                    )}
-                    {yAxisFields.map((item, index) => (
-                      <Draggable
-                        key={`y-${item.field.id}`}
-                        draggableId={`y-${item.field.id}`}
-                        index={index}
-                      >
-                        {(provided, snapshot) => (
-                          <div
-                            ref={provided.innerRef}
-                            {...provided.draggableProps}
-                            {...provided.dragHandleProps}
-                            className="flex items-center gap-3 bg-white border border-gray-200 rounded-lg px-3 py-2 shadow-sm"
-                            style={{
-                              userSelect: 'none',
-                              WebkitUserSelect: 'none',
-                              MozUserSelect: 'none',
-                              msUserSelect: 'none',
-                              touchAction: 'none',
-                              ...provided.draggableProps.style
-                            }}
-                          >
-                            <div className={`${
-                              item.field.type === 'number' ? 'text-green-600' :
-                              item.field.type === 'date' ? 'text-purple-600' :
-                              'text-gray-600'
-                            }`}>
-                              {getFieldIcon(item.field.type)}
-                            </div>
-                            <span className="text-sm flex-1 truncate font-medium">{item.field.name}</span>
-                            <span className="text-xs text-gray-500 capitalize">{item.field.type}</span>
-                            <button
-                              onClick={() => onRemoveField(item.field.id, 'y')}
-                              className="text-gray-400 hover:text-red-600 transition-colors"
-                            >
-                              <X className="w-4 h-4" />
-                            </button>
-                          </div>
-                        )}
-                      </Draggable>
-                    ))}
-                  </div>
-                  {provided.placeholder}
-                </div>
-              )}
-            </Droppable>
+            <DroppableAxis
+              id="y-axis"
+              title="Y-Axis (Values)"
+              description="Drop a numeric field here to use as values on the Y-axis"
+              fields={yAxisFields}
+              axis="y"
+              onRemoveField={onRemoveField}
+            />
           )}
 
           {showValue && (
-            <Droppable droppableId="value-axis">
-              {(provided, snapshot) => (
-                <div
-                  ref={provided.innerRef}
-                  {...provided.droppableProps}
-                  className={`border-2 border-dashed rounded-lg p-4 min-h-[80px] transition-colors ${
-                    snapshot.isDraggingOver
-                      ? 'border-blue-400 bg-blue-50'
-                      : 'border-gray-300 bg-gray-50'
-                  }`}
-                >
-                  <p className="text-sm font-medium text-gray-700 mb-3">Values</p>
-                  <div className="space-y-2">
-                    {valueFields.length === 0 && (
-                      <p className="text-sm text-gray-400 italic">Drop a numeric field here for pie chart values</p>
-                    )}
-                    {valueFields.map((item, index) => (
-                      <Draggable
-                        key={`value-${item.field.id}`}
-                        draggableId={`value-${item.field.id}`}
-                        index={index}
-                      >
-                        {(provided, snapshot) => (
-                          <div
-                            ref={provided.innerRef}
-                            {...provided.draggableProps}
-                            {...provided.dragHandleProps}
-                            className="flex items-center gap-3 bg-white border border-gray-200 rounded-lg px-3 py-2 shadow-sm"
-                            style={{
-                              userSelect: 'none',
-                              WebkitUserSelect: 'none',
-                              MozUserSelect: 'none',
-                              msUserSelect: 'none',
-                              touchAction: 'none',
-                              ...provided.draggableProps.style
-                            }}
-                          >
-                            <div className={`${
-                              item.field.type === 'number' ? 'text-green-600' :
-                              item.field.type === 'date' ? 'text-purple-600' :
-                              'text-gray-600'
-                            }`}>
-                              {getFieldIcon(item.field.type)}
-                            </div>
-                            <span className="text-sm flex-1 truncate font-medium">{item.field.name}</span>
-                            <span className="text-xs text-gray-500 capitalize">{item.field.type}</span>
-                            <button
-                              onClick={() => onRemoveField(item.field.id, 'value')}
-                              className="text-gray-400 hover:text-red-600 transition-colors"
-                            >
-                              <X className="w-4 h-4" />
-                            </button>
-                          </div>
-                        )}
-                      </Draggable>
-                    ))}
-                  </div>
-                  {provided.placeholder}
-                </div>
-              )}
-            </Droppable>
+            <DroppableAxis
+              id="value-axis"
+              title="Values"
+              description="Drop a numeric field here to use as pie chart values"
+              fields={valueFields}
+              axis="value"
+              onRemoveField={onRemoveField}
+            />
           )}
         </div>
       </div>

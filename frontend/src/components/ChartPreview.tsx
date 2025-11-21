@@ -32,6 +32,32 @@ interface ChartPreviewProps {
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
 
+// Helper function to format month/year combinations
+const formatMonthYear = (year: number, month: number): string => {
+  const monthNames = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+  ];
+  return `${monthNames[month - 1]}/${year}`;
+};
+
+// Helper function to determine if a field represents temporal data
+const isTemporalField = (fieldId: string): boolean => {
+  const temporalFields = ['year', 'month', 'date', 'timestamp'];
+  return temporalFields.some(field => fieldId.toLowerCase().includes(field));
+};
+
+// Helper function to create a temporal key for grouping
+const createTemporalKey = (item: any): string => {
+  if (item.year && item.month) {
+    return formatMonthYear(item.year, item.month);
+  }
+  if (item.year) {
+    return item.year.toString();
+  }
+  return 'Unknown';
+};
+
 export default function ChartPreview({
   config,
   rawData,
@@ -41,7 +67,9 @@ export default function ChartPreview({
 
   // Process raw data for chart consumption
   const processedData = useMemo(() => {
-    if (!rawData || !rawData.items.length) return [];
+    if (!rawData || !rawData.items || !rawData.items.length) {
+      return [];
+    }
 
     const xAxisField = config.data_fields.find(df => df.axis === 'x');
     const yAxisFields = config.data_fields.filter(df => df.axis === 'y');
@@ -49,10 +77,23 @@ export default function ChartPreview({
 
     if (!xAxisField && !valueField) return [];
 
-    // For pie charts, we need to aggregate data by the x-axis field
+    // Check if we're dealing with temporal data
+    const isTemporalData = xAxisField && (
+      isTemporalField(xAxisField.field.id) || 
+      (rawData.items[0]?.year && rawData.items[0]?.month)
+    );
+
+    // For pie charts, aggregate data
     if (config.chart_type === 'pie' && xAxisField && valueField) {
       const aggregated = rawData.items.reduce((acc, item) => {
-        const key = item[xAxisField.field.id] || 'Unknown';
+        let key: string;
+        
+        if (isTemporalData) {
+          key = createTemporalKey(item);
+        } else {
+          key = item[xAxisField.field.id] || 'Unknown';
+        }
+        
         const value = Number(item[valueField.field.id]) || 0;
         
         if (acc[key]) {
@@ -72,21 +113,117 @@ export default function ChartPreview({
       }));
     }
 
-    // For other chart types, process data directly
+    // For other chart types, process data with temporal grouping if needed
+    if (isTemporalData && xAxisField) {
+      // Group data by temporal key and aggregate numeric values
+      const grouped = rawData.items.reduce((acc, item) => {
+        const temporalKey = createTemporalKey(item);
+        
+        if (!acc[temporalKey]) {
+          acc[temporalKey] = {
+            [xAxisField.field.id]: temporalKey,
+            [xAxisField.field.name]: temporalKey,
+            count: 0,
+          };
+          
+          // Initialize all y-axis fields
+          yAxisFields.forEach(yField => {
+            acc[temporalKey][yField.field.id] = 0;
+            acc[temporalKey][yField.field.name] = 0;
+          });
+        }
+        
+        acc[temporalKey].count += 1;
+        
+        // Aggregate y-axis values
+        yAxisFields.forEach(yField => {
+          const value = Number(item[yField.field.id]) || 0;
+          acc[temporalKey][yField.field.id] += value;
+          acc[temporalKey][yField.field.name] += value;
+        });
+        
+        return acc;
+      }, {} as Record<string, any>);
+
+      // Convert to array and sort by temporal order
+      const result = Object.values(grouped).sort((a, b) => {
+        // Extract year and month for proper sorting
+        const extractYearMonth = (key: string) => {
+          if (key.includes('/')) {
+            const [month, year] = key.split('/');
+            const monthIndex = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                              'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].indexOf(month);
+            return { year: parseInt(year), month: monthIndex };
+          }
+          return { year: parseInt(key) || 0, month: 0 };
+        };
+        
+        const aTime = extractYearMonth(a[xAxisField.field.id]);
+        const bTime = extractYearMonth(b[xAxisField.field.id]);
+        
+        if (aTime.year !== bTime.year) {
+          return aTime.year - bTime.year;
+        }
+        return aTime.month - bTime.month;
+      });
+
+      return result;
+    }
+
+    // For non-temporal data, process normally but still group by x-axis value
+    if (xAxisField) {
+      const grouped = rawData.items.reduce((acc, item) => {
+        const key = item[xAxisField.field.id] || 'Unknown';
+        
+        if (!acc[key]) {
+          acc[key] = {
+            [xAxisField.field.id]: key,
+            [xAxisField.field.name]: key,
+            count: 0,
+          };
+          
+          // Initialize all y-axis fields
+          yAxisFields.forEach(yField => {
+            acc[key][yField.field.id] = 0;
+            acc[key][yField.field.name] = 0;
+          });
+        }
+        
+        acc[key].count += 1;
+        
+        // Aggregate y-axis values
+        yAxisFields.forEach(yField => {
+          const value = Number(item[yField.field.id]) || 0;
+          acc[key][yField.field.id] += value;
+          acc[key][yField.field.name] += value;
+        });
+        
+        return acc;
+      }, {} as Record<string, any>);
+
+      return Object.values(grouped);
+    }
+
+    // Fallback to original processing
     return rawData.items.map(item => {
-      const processedItem: Record<string, unknown> = {};
+      const processedItem: Record<string, any> = {};
       
-      // Add x-axis field
       if (xAxisField) {
-        processedItem[xAxisField.field.id] = item[xAxisField.field.id];
-        processedItem[xAxisField.field.name] = item[xAxisField.field.id];
+        let xValue = item[xAxisField.field.id];
+        
+        // Format temporal data
+        if (isTemporalData) {
+          xValue = createTemporalKey(item);
+        }
+        
+        processedItem[xAxisField.field.id] = xValue;
+        processedItem[xAxisField.field.name] = xValue;
       }
       
-      // Add y-axis fields
       yAxisFields.forEach(yField => {
-        const value = item[yField.field.id];
-        processedItem[yField.field.id] = typeof value === 'number' ? value : Number(value) || 0;
-        processedItem[yField.field.name] = typeof value === 'number' ? value : Number(value) || 0;
+        const yValue = item[yField.field.id];
+        processedItem[yField.field.id] = typeof yValue === 'number' ? yValue : Number(yValue) || 0;
+        processedItem[yField.field.name] = typeof yValue === 'number' ? yValue : Number(yValue) || 0;
       });
       
       return processedItem;
@@ -169,20 +306,40 @@ export default function ChartPreview({
       margin: { top: 20, right: 30, left: 20, bottom: 20 },
     };
 
+    // Custom tooltip for better temporal data display
+    const CustomTooltip = ({ active, payload, label }: any) => {
+      if (active && payload && payload.length) {
+        return (
+          <div className="bg-white p-3 border border-gray-200 rounded-lg shadow-lg">
+            <p className="font-medium text-gray-900">{label}</p>
+            {payload.map((entry: any, index: number) => (
+              <p key={index} style={{ color: entry.color }}>
+                {entry.name}: {typeof entry.value === 'number' ? entry.value.toLocaleString() : entry.value}
+              </p>
+            ))}
+          </div>
+        );
+      }
+      return null;
+    };
+
     switch (config.chart_type) {
       case 'bar':
         return (
-          <ResponsiveContainer width="100%" height="100%">
+          <ResponsiveContainer width="100%" height={400}>
             <BarChart {...commonProps}>
               {config.config.showGrid && <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />}
               <XAxis
                 dataKey={xAxisField?.field.id}
                 label={config.config.xAxisLabel ? { value: config.config.xAxisLabel, position: 'insideBottom', offset: -10 } : undefined}
+                angle={-45}
+                textAnchor="end"
+                height={60}
               />
               <YAxis
                 label={config.config.yAxisLabel ? { value: config.config.yAxisLabel, angle: -90, position: 'insideLeft' } : undefined}
               />
-              <Tooltip />
+              <Tooltip content={<CustomTooltip />} />
               {config.config.showLegend && <Legend />}
               {yAxisFields.map((field, index) => (
                 <Bar
@@ -198,17 +355,20 @@ export default function ChartPreview({
 
       case 'line':
         return (
-          <ResponsiveContainer width="100%" height="100%">
+          <ResponsiveContainer width="100%" height={400}>
             <LineChart {...commonProps}>
               {config.config.showGrid && <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />}
               <XAxis
                 dataKey={xAxisField?.field.id}
                 label={config.config.xAxisLabel ? { value: config.config.xAxisLabel, position: 'insideBottom', offset: -10 } : undefined}
+                angle={-45}
+                textAnchor="end"
+                height={60}
               />
               <YAxis
                 label={config.config.yAxisLabel ? { value: config.config.yAxisLabel, angle: -90, position: 'insideLeft' } : undefined}
               />
-              <Tooltip />
+              <Tooltip content={<CustomTooltip />} />
               {config.config.showLegend && <Legend />}
               {yAxisFields.map((field, index) => (
                 <Line
@@ -218,6 +378,7 @@ export default function ChartPreview({
                   name={field.field.name}
                   stroke={chartColors[index % chartColors.length]}
                   strokeWidth={2}
+                  dot={{ r: 4 }}
                 />
               ))}
             </LineChart>
@@ -226,17 +387,20 @@ export default function ChartPreview({
 
       case 'area':
         return (
-          <ResponsiveContainer width="100%" height="100%">
+          <ResponsiveContainer width="100%" height={400}>
             <AreaChart {...commonProps}>
               {config.config.showGrid && <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />}
               <XAxis
                 dataKey={xAxisField?.field.id}
                 label={config.config.xAxisLabel ? { value: config.config.xAxisLabel, position: 'insideBottom', offset: -10 } : undefined}
+                angle={-45}
+                textAnchor="end"
+                height={60}
               />
               <YAxis
                 label={config.config.yAxisLabel ? { value: config.config.yAxisLabel, angle: -90, position: 'insideLeft' } : undefined}
               />
-              <Tooltip />
+              <Tooltip content={<CustomTooltip />} />
               {config.config.showLegend && <Legend />}
               {yAxisFields.map((field, index) => (
                 <Area
@@ -254,7 +418,7 @@ export default function ChartPreview({
 
       case 'pie':
         return (
-          <ResponsiveContainer width="100%" height="100%">
+          <ResponsiveContainer width="100%" height={400}>
             <PieChart>
               <Pie
                 data={processedData}
@@ -263,13 +427,13 @@ export default function ChartPreview({
                 cx="50%"
                 cy="50%"
                 outerRadius={150}
-                label={({ name, value }) => `${name}: ${value}`}
+                label={({ name, value }) => `${name}: ${typeof value === 'number' ? value.toLocaleString() : value}`}
               >
                 {processedData.map((_, index) => (
                   <Cell key={`cell-${index}`} fill={chartColors[index % chartColors.length]} />
                 ))}
               </Pie>
-              <Tooltip />
+              <Tooltip content={<CustomTooltip />} />
               {config.config.showLegend && <Legend />}
             </PieChart>
           </ResponsiveContainer>
@@ -280,7 +444,7 @@ export default function ChartPreview({
         const yField = yAxisFields[0]?.field.id;
         
         return (
-          <ResponsiveContainer width="100%" height="100%">
+          <ResponsiveContainer width="100%" height={400}>
             <ScatterChart {...commonProps}>
               {config.config.showGrid && <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />}
               <XAxis
@@ -293,7 +457,7 @@ export default function ChartPreview({
                 type="number"
                 label={config.config.yAxisLabel ? { value: config.config.yAxisLabel, angle: -90, position: 'insideLeft' } : undefined}
               />
-              <Tooltip cursor={{ strokeDasharray: '3 3' }} />
+              <Tooltip content={<CustomTooltip />} cursor={{ strokeDasharray: '3 3' }} />
               {config.config.showLegend && <Legend />}
               <Scatter
                 name="Data Points"

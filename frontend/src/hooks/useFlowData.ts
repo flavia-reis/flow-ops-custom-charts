@@ -21,7 +21,6 @@ export const useFlowData = () => {
       setApiStatus(prev => ({ ...prev, isLoading: true }));
       await flowOpsAPI.healthCheck();
       setApiStatus({ isConnected: true, isLoading: false });
-      toast.success('Connected to Flow Ops API');
     } catch (error) {
       setApiStatus({ 
         isConnected: false, 
@@ -43,8 +42,6 @@ export const useFlowData = () => {
       
       const data = await flowOpsAPI.getRawData(params);
       setRawData(data);
-      
-      toast.success(`Loaded ${data.items.length} items from Flow API (${data.total_items} total)`);
       
       setApiStatus(prev => ({ ...prev, isLoading: false }));
       return data;
@@ -83,8 +80,6 @@ export const useFlowData = () => {
       
       setAvailableFields(dataFields);
       setApiStatus(prev => ({ ...prev, isLoading: false }));
-      
-      toast.success(`Found ${fields.length} available fields`);
       return dataFields;
     } catch (error: any) {
       const errorMessage = error.message || 'Failed to fetch data fields';

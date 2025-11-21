@@ -1,5 +1,5 @@
 import { Database, Calendar, Hash, Type } from 'lucide-react';
-import { useDraggable } from '@dnd-kit/core';
+import { useDraggable } from "@dnd-kit/core"
 import { DataField } from '../types/chart';
 
 interface DataFieldsPanelProps {

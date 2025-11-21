@@ -1,20 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import {
+  closestCenter,
   DndContext,
   DragEndEvent,
   DragOverlay,
   DragStartEvent,
-  closestCenter,
   KeyboardSensor,
   PointerSensor,
   useSensor,
   useSensors,
-} from '@dnd-kit/core';
+} from "@dnd-kit/core"; 
 import { Toaster } from 'react-hot-toast';
 import ChartBuilder from './components/ChartBuilder';
 import DataFieldsPanel from './components/DataFieldsPanel';
 import { DateRangeSelector } from './components/DateRangeSelector';
-import { ApiStatus } from './components/ApiStatus';
 import { useFlowData } from './hooks/useFlowData';
 import { ChartConfiguration, DateRange, DataField } from './types/chart';
 
@@ -25,7 +24,6 @@ function App() {
     apiStatus,
     fetchRawData,
     fetchDataFields,
-    refreshConnection,
   } = useFlowData();
 
   const [activeField, setActiveField] = useState<DataField | null>(null);
@@ -41,15 +39,28 @@ function App() {
     };
   });
 
+
   const [chartConfig, setChartConfig] = useState<ChartConfiguration>({
     name: 'New Chart',
     chart_type: 'bar',
-    data_fields: [],
+    data_fields: {},
     filters: [],
     config: {
       showLegend: true,
       showGrid: true,
       colors: ['#3B82F6', '#EF4444', '#10B981', '#F59E0B', '#8B5CF6'],
+    },
+    overlay: {
+      enabled: false,
+      type: 'pie',
+      position: 'top-right',
+      size: 'small',
+      data_fields: [],
+      config: {
+        showLegend: false,
+        showGrid: false,
+        colors: ['#8b5cf6', '#ec4899', '#14b8a6', '#f97316'],
+      },
     },
   });
 
@@ -99,48 +110,83 @@ function App() {
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event;
-    
-    setActiveField(null);
+  const { active, over } = event;
+  setActiveField(null);
 
-    if (!over) return;
+  if (!over) return;
 
-    // Handle drag from available fields to chart axes
-    if (
-      active.data.current?.type === 'field' && 
-      over.data.current?.type === 'axis'
-    ) {
-      const field = active.data.current.field;
-      const targetAxis = over.data.current.axis;
-      
-      // Remove any existing field from the same axis
-      const updatedFields = chartConfig.data_fields.filter(df => df.axis !== targetAxis);
-      
-      // Add the new field
-      updatedFields.push({ field, axis: targetAxis });
-      
-      setChartConfig(prev => ({
-        ...prev,
-        data_fields: updatedFields,
-      }));
-    }
+  // Handle drag from available fields to chart axes
+  if (
+    active.data.current?.type === 'field' &&
+    over.data.current?.type === 'axis'
+  ) {
+    const field = active.data.current.field;
+    const targetAxis = over.data.current.axis;
 
-    // Handle reordering within the same axis (future enhancement)
-    if (
-      active.data.current?.type === 'axis-field' && 
-      over.data.current?.type === 'axis' &&
-      active.data.current.axis === over.data.current.axis
-    ) {
-      // For now, we'll just keep the existing behavior
-      // In the future, we could implement reordering within the same axis
-    }
-  };
+    console.log('Dragging field to axis:', { field: field.name, targetAxis });
 
-  const handleRemoveField = (fieldId: string, axis: 'x' | 'y' | 'value') => {
+    // NOVA LÓGICA: Atualizar a estrutura ComposedDataFields
     setChartConfig(prev => ({
       ...prev,
-      data_fields: prev.data_fields.filter(df => !(df.field.id === fieldId && df.axis === axis)),
+      dataFields: {
+        ...prev.dataFields,
+        [targetAxis]: field.id, // Usar o ID do campo
+      },
     }));
+  }
+
+  // Handle drag from available fields to overlay chart axes
+  if (
+    active.data.current?.type === 'field' &&
+    over.data.current?.type === 'overlay-axis'
+  ) {
+    const field = active.data.current.field;
+    const targetAxis = over.data.current.axis;
+
+    if (!chartConfig.overlay) return;
+
+    console.log('Dragging field to overlay axis:', { field: field.name, targetAxis });
+
+    setChartConfig(prev => ({
+      ...prev,
+      overlay: {
+        ...prev.overlay!,
+        dataFields: {
+          ...prev.overlay!.dataFields,
+          [targetAxis]: field.id,
+        },
+      },
+    }));
+  }
+  };
+
+   const handleRemoveField = (
+    fieldId: string, 
+    axis: 'x' | 'y' | 'value' | 'primaryX' | 'primaryY' | 'secondaryX' | 'secondaryY', 
+    isOverlay: boolean = false
+    ) => {
+    console.log('Removing field:', { fieldId, axis, isOverlay });
+
+    if (isOverlay && chartConfig.overlay) {
+      setChartConfig(prev => ({
+        ...prev,
+        overlay: {
+          ...prev.overlay!,
+          dataFields: {
+            ...prev.overlay!.dataFields,
+            [axis]: undefined, // Remove o campo do axis específico
+          },
+        },
+      }));
+    } else {
+      setChartConfig(prev => ({
+        ...prev,
+        dataFields: {
+          ...prev.dataFields,
+          [axis]: undefined, // Remove o campo do axis específico
+        },
+      }));
+    }
   };
 
   return (
@@ -154,7 +200,7 @@ function App() {
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Flow Ops Chart Builder</h1>
               <p className="text-sm text-gray-600 mt-1">
-                Create custom charts from your Flow productivity data
+                Create custom charts with overlay support from your Flow productivity data
               </p>
             </div>
           </div>
@@ -162,10 +208,7 @@ function App() {
       </header>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {/* API Status */}
-        <div className="mb-6">
-          <ApiStatus status={apiStatus} onRetry={refreshConnection} />
-        </div>
+       
 
         {/* Date Range Selector */}
         <div className="mb-6">
@@ -226,43 +269,7 @@ function App() {
             ) : null}
           </DragOverlay>
         </DndContext>
-
-        {/* Data Summary */}
-        {rawData && (
-          <div className="mt-6 bg-white p-4 rounded-lg shadow-sm border border-gray-200">
-            <h3 className="text-lg font-semibold text-gray-800 mb-2">Data Summary</h3>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-              <div>
-                <span className="text-gray-600">Total Items:</span>
-                <span className="ml-2 font-medium">{rawData.total_items}</span>
-              </div>
-              <div>
-                <span className="text-gray-600">Current Page:</span>
-                <span className="ml-2 font-medium">{rawData.page} of {rawData.total_pages || 1}</span>
-              </div>
-              <div>
-                <span className="text-gray-600">Items Loaded:</span>
-                <span className="ml-2 font-medium">{rawData.items.length}</span>
-              </div>
-              <div>
-                <span className="text-gray-600">Available Fields:</span>
-                <span className="ml-2 font-medium">{availableFields.length}</span>
-              </div>
-            </div>
-            
-            {/* Sample Data Preview */}
-            {rawData.items.length > 0 && (
-              <div className="mt-4">
-                <h4 className="text-sm font-medium text-gray-700 mb-2">Sample Data:</h4>
-                <div className="bg-gray-50 p-3 rounded-md overflow-x-auto">
-                  <pre className="text-xs text-gray-600">
-                    {JSON.stringify(rawData.items[0], null, 2)}
-                  </pre>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
+        
       </div>
     </div>
   );

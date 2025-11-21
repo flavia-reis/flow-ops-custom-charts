@@ -14,11 +14,10 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  Legend,
   Cell,
   ResponsiveContainer,
 } from 'recharts';
-import { Image as ImageIcon, FileText, Loader } from 'lucide-react';
+import { Image as ImageIcon, FileText, Loader, Layers } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { ChartConfiguration } from '../types/chart';
@@ -65,179 +64,140 @@ export default function ChartPreview({
 }: ChartPreviewProps) {
   const chartRef = useRef<HTMLDivElement>(null);
 
-  // Process raw data for chart consumption
-  const processedData = useMemo(() => {
+  // NOVA LÓGICA: Processar dados usando ComposedDataFields
+  const processedMainData = useMemo(() => {
+    if (!rawData || !config.dataFields) return [];
+    
+    // Para gráficos simples
+    return processSimpleChartData(rawData, config.dataFields, config.chart_type);
+  }, [rawData, config.dataFields, config.chart_type]);
+
+  // Process data for overlay chart
+  const processedOverlayData = useMemo(() => {
+    if (!config.overlay?.enabled || !config.overlay.dataFields) {
+      return [];
+    }
+    return processSimpleChartData(rawData, config.overlay.dataFields, config.overlay.type);
+  }, [rawData, config.overlay]);
+
+  // NOVA FUNÇÃO: Processar dados para gráficos simples
+  function processSimpleChartData(rawData: RawDataResponse | null, dataFields: any, chartType: string) {
     if (!rawData || !rawData.items || !rawData.items.length) {
       return [];
     }
 
-    const xAxisField = config.data_fields.find(df => df.axis === 'x');
-    const yAxisFields = config.data_fields.filter(df => df.axis === 'y');
-    const valueField = config.data_fields.find(df => df.axis === 'value');
+    const xField = dataFields.x;
+    const yField = dataFields.y;
+    const valueField = dataFields.value;
 
-    if (!xAxisField && !valueField) return [];
+    if (!xField && !valueField) return [];
 
     // Check if we're dealing with temporal data
-    const isTemporalData = xAxisField && (
-      isTemporalField(xAxisField.field.id) || 
+    const isTemporalData = xField && (
+      isTemporalField(xField) ||
       (rawData.items[0]?.year && rawData.items[0]?.month)
     );
 
     // For pie charts, aggregate data
-    if (config.chart_type === 'pie' && xAxisField && valueField) {
+    if (chartType === 'pie' && xField && valueField) {
       const aggregated = rawData.items.reduce((acc, item) => {
         let key: string;
-        
         if (isTemporalData) {
           key = createTemporalKey(item);
         } else {
-          key = item[xAxisField.field.id] || 'Unknown';
+          key = item[xField] || 'Unknown';
         }
-        
-        const value = Number(item[valueField.field.id]) || 0;
-        
+        const value = Number(item[valueField]) || 0;
         if (acc[key]) {
           acc[key] += value;
         } else {
           acc[key] = value;
         }
-        
         return acc;
       }, {} as Record<string, number>);
 
       return Object.entries(aggregated).map(([name, value]) => ({
         name,
         value,
-        [xAxisField.field.id]: name,
-        [valueField.field.id]: value,
+        [xField]: name,
+        [valueField]: value,
       }));
     }
 
-    // For other chart types, process data with temporal grouping if needed
-    if (isTemporalData && xAxisField) {
-      // Group data by temporal key and aggregate numeric values
+    // For other chart types with temporal grouping
+    if (isTemporalData && xField) {
       const grouped = rawData.items.reduce((acc, item) => {
         const temporalKey = createTemporalKey(item);
-        
         if (!acc[temporalKey]) {
           acc[temporalKey] = {
-            [xAxisField.field.id]: temporalKey,
-            [xAxisField.field.name]: temporalKey,
+            [xField]: temporalKey,
             count: 0,
           };
-          
-          // Initialize all y-axis fields
-          yAxisFields.forEach(yField => {
-            acc[temporalKey][yField.field.id] = 0;
-            acc[temporalKey][yField.field.name] = 0;
-          });
+          if (yField) {
+            acc[temporalKey][yField] = 0;
+          }
         }
-        
         acc[temporalKey].count += 1;
-        
-        // Aggregate y-axis values
-        yAxisFields.forEach(yField => {
-          const value = Number(item[yField.field.id]) || 0;
-          acc[temporalKey][yField.field.id] += value;
-          acc[temporalKey][yField.field.name] += value;
-        });
-        
+        if (yField) {
+          const value = Number(item[yField]) || 0;
+          acc[temporalKey][yField] += value;
+        }
         return acc;
       }, {} as Record<string, any>);
 
-      // Convert to array and sort by temporal order
-      const result = Object.values(grouped).sort((a, b) => {
-        // Extract year and month for proper sorting
+      return Object.values(grouped).sort((a, b) => {
         const extractYearMonth = (key: string) => {
           if (key.includes('/')) {
             const [month, year] = key.split('/');
             const monthIndex = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-                              'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].indexOf(month);
+              'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].indexOf(month);
             return { year: parseInt(year), month: monthIndex };
           }
           return { year: parseInt(key) || 0, month: 0 };
         };
-        
-        const aTime = extractYearMonth(a[xAxisField.field.id]);
-        const bTime = extractYearMonth(b[xAxisField.field.id]);
-        
+
+        const aTime = extractYearMonth(a[xField]);
+        const bTime = extractYearMonth(b[xField]);
         if (aTime.year !== bTime.year) {
           return aTime.year - bTime.year;
         }
         return aTime.month - bTime.month;
       });
-
-      return result;
     }
 
-    // For non-temporal data, process normally but still group by x-axis value
-    if (xAxisField) {
+    // For non-temporal data, group by x-axis value
+    if (xField) {
       const grouped = rawData.items.reduce((acc, item) => {
-        const key = item[xAxisField.field.id] || 'Unknown';
-        
+        const key = item[xField] || 'Unknown';
         if (!acc[key]) {
           acc[key] = {
-            [xAxisField.field.id]: key,
-            [xAxisField.field.name]: key,
+            [xField]: key,
             count: 0,
           };
-          
-          // Initialize all y-axis fields
-          yAxisFields.forEach(yField => {
-            acc[key][yField.field.id] = 0;
-            acc[key][yField.field.name] = 0;
-          });
+          if (yField) {
+            acc[key][yField] = 0;
+          }
         }
-        
         acc[key].count += 1;
-        
-        // Aggregate y-axis values
-        yAxisFields.forEach(yField => {
-          const value = Number(item[yField.field.id]) || 0;
-          acc[key][yField.field.id] += value;
-          acc[key][yField.field.name] += value;
-        });
-        
+        if (yField) {
+          const value = Number(item[yField]) || 0;
+          acc[key][yField] += value;
+        }
         return acc;
       }, {} as Record<string, any>);
 
       return Object.values(grouped);
     }
 
-    // Fallback to original processing
-    return rawData.items.map(item => {
-      const processedItem: Record<string, any> = {};
-      
-      if (xAxisField) {
-        let xValue = item[xAxisField.field.id];
-        
-        // Format temporal data
-        if (isTemporalData) {
-          xValue = createTemporalKey(item);
-        }
-        
-        processedItem[xAxisField.field.id] = xValue;
-        processedItem[xAxisField.field.name] = xValue;
-      }
-      
-      yAxisFields.forEach(yField => {
-        const yValue = item[yField.field.id];
-        processedItem[yField.field.id] = typeof yValue === 'number' ? yValue : Number(yValue) || 0;
-        processedItem[yField.field.name] = typeof yValue === 'number' ? yValue : Number(yValue) || 0;
-      });
-      
-      return processedItem;
-    });
-  }, [rawData, config.data_fields, config.chart_type]);
+    return [];
+  }
 
   const exportToPNG = async () => {
     if (!chartRef.current) return;
-
     const canvas = await html2canvas(chartRef.current, {
       backgroundColor: '#ffffff',
       scale: 2,
     });
-
     const link = document.createElement('a');
     link.download = `${config.name || 'chart'}-${Date.now()}.png`;
     link.href = canvas.toDataURL('image/png');
@@ -246,33 +206,350 @@ export default function ChartPreview({
 
   const exportToPDF = async () => {
     if (!chartRef.current) return;
-
     const canvas = await html2canvas(chartRef.current, {
       backgroundColor: '#ffffff',
       scale: 2,
     });
-
     const imgData = canvas.toDataURL('image/png');
     const pdf = new jsPDF({
       orientation: canvas.width > canvas.height ? 'landscape' : 'portrait',
       unit: 'px',
       format: [canvas.width, canvas.height],
     });
-
     pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
     pdf.save(`${config.name || 'chart'}-${Date.now()}.pdf`);
   };
 
-  const xAxisField = config.data_fields.find(df => df.axis === 'x');
-  const yAxisFields = config.data_fields.filter(df => df.axis === 'y');
-  const valueField = config.data_fields.find(df => df.axis === 'value');
+  // NOVA LÓGICA: Verificar se pode renderizar
+  const hasMainData = processedMainData.length > 0;
+  const canRenderMainChart = hasMainData && (
+  (config.chart_type === 'pie' && config.dataFields?.value) ||
+  (config.chart_type !== 'pie' && !config.isComposed && config.dataFields?.x && config.dataFields?.y) ||
+  (config.isComposed && (
+    (config.dataFields?.primaryY1 && config.dataFields?.primaryY1) ||
+    (config.dataFields?.secondaryY1 && config.dataFields?.secondaryY1)
+  ))
+);
 
-  const hasData = processedData.length > 0;
-  const canRenderChart =
-    (config.chart_type === 'pie' && valueField && hasData) ||
-    (config.chart_type !== 'pie' && xAxisField && yAxisFields.length > 0 && hasData);
+  const hasOverlayData = processedOverlayData.length > 0;
+  const canRenderOverlay = config.overlay?.enabled && hasOverlayData;
 
-  const renderChart = () => {
+  // Get overlay dimensions based on size
+  const getOverlayDimensions = () => {
+    switch (config.overlay?.size) {
+      case 'small': return { width: 200, height: 150 };
+      case 'medium': return { width: 300, height: 200 };
+      case 'large': return { width: 400, height: 250 };
+      default: return { width: 200, height: 150 };
+    }
+  };
+
+  // Get overlay position classes
+  const getOverlayPositionClasses = () => {
+    switch (config.overlay?.position) {
+      case 'top-left': return 'top-4 left-4';
+      case 'top-right': return 'top-4 right-4';
+      case 'bottom-left': return 'bottom-4 left-4';
+      case 'bottom-right': return 'bottom-4 right-4';
+      default: return 'top-4 right-4';
+    }
+  };
+
+  const CustomTooltip = ({ active, payload, label }: any) => {
+    if (active && payload && payload.length) {
+      return (
+        <div className="bg-white p-2 border border-gray-200 rounded shadow-lg text-xs">
+          <p className="font-medium text-gray-900">{label}</p>
+          {payload.map((entry: any, index: number) => (
+            <p key={index} style={{ color: entry.color }}>
+              {entry.name}: {typeof entry.value === 'number' ? entry.value.toLocaleString() : entry.value}
+            </p>
+          ))}
+        </div>
+      );
+    }
+    return null;
+  };
+
+  // NOVA FUNÇÃO: Renderizar gráficos sobrepostos independentes
+  const renderOverlaidCharts = () => {
+    if (!config.isComposed) return null;
+
+    const chartColors = config.config.colors || COLORS;
+    const secondaryColors = ['#8b5cf6', '#ec4899', '#14b8a6', '#f97316']; // Cores diferentes para o segundo gráfico
+
+    // CORRIGIDO: Dados para o gráfico primário
+    const primaryData = processSimpleChartData(rawData, {
+      x: config.dataFields?.primaryY1,  // CORRIGIDO
+      y: config.dataFields?.primaryY1,  // CORRIGIDO
+    }, config.chart_type);
+
+    // CORRIGIDO: Dados para o gráfico secundário
+    const secondaryData = processSimpleChartData(rawData, {
+      x: config.dataFields?.secondaryY1, // CORRIGIDO
+      y: config.dataFields?.secondaryY1, // CORRIGIDO
+    }, config.secondaryChartType || 'line');
+
+    // Verificar se temos dados suficientes para renderizar
+    const canRenderPrimary = config.dataFields?.primaryY1 && config.dataFields?.primaryY1 && primaryData.length > 0;
+    const canRenderSecondary = config.dataFields?.secondaryY1 && config.dataFields?.secondaryY1 && secondaryData.length > 0;
+
+    if (!canRenderPrimary && !canRenderSecondary) {
+      return (
+        <div className="h-full flex items-center justify-center text-gray-400">
+          <div className="text-center">
+            <p className="text-lg font-medium">Configure overlaid charts</p>
+            <p className="text-sm mt-1">
+              Drag fields to both Primary and Secondary chart areas to see overlaid visualization
+            </p>
+            <div className="text-xs mt-2 text-gray-500">
+              <p>Primary: {config.dataFields?.primaryY1 ? '✅' : '❌'} X-Axis, {config.dataFields?.primaryY1 ? '✅' : '❌'} Y-Axis</p>
+              <p>Secondary: {config.dataFields?.secondaryY1 ? '✅' : '❌'} X-Axis, {config.dataFields?.secondaryY1 ? '✅' : '❌'} Y-Axis</p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="relative w-full h-[400px]">
+        {/* Gráfico Primário (fundo) */}
+        {canRenderPrimary && (
+          <div className="absolute inset-0 z-10">
+            <ResponsiveContainer width="100%" height="100%">
+              {renderSingleChart(
+                primaryData, 
+                config.chart_type, 
+                config.dataFields?.primaryY1,
+                config.dataFields?.primaryY1,
+                chartColors,
+                {
+                  showTopXAxis: false,
+                  showBottomXAxis: true,
+                  showLeftYAxis: true,
+                  showRightYAxis: false,
+                  opacity: 0.8
+                }
+              )}
+            </ResponsiveContainer>
+          </div>
+        )}
+
+        {/* Gráfico Secundário (frente) */}
+        {canRenderSecondary && (
+          <div className="absolute inset-0 z-20">
+            <ResponsiveContainer width="100%" height="100%">
+              {renderSingleChart(
+                secondaryData, 
+                config.secondaryChartType || 'line', 
+                config.dataFields?.secondaryY1,
+                config.dataFields?.secondaryY1,
+                secondaryColors,
+                {
+                  showTopXAxis: true,
+                  showBottomXAxis: false,
+                  showLeftYAxis: false,
+                  showRightYAxis: true,
+                  opacity: 0.7,
+                  backgroundColor: 'transparent'
+                }
+              )}
+            </ResponsiveContainer>
+          </div>
+        )}
+
+        {/* Legendas customizadas */}
+        {(canRenderPrimary || canRenderSecondary) && (
+          <div className="absolute top-2 left-2 z-30 bg-white/90 rounded p-2 text-xs">
+            {canRenderPrimary && (
+              <div className="flex items-center gap-2 mb-1">
+                <div className="w-3 h-3 rounded" style={{ backgroundColor: chartColors[0] }}></div>
+                <span>{config.chart_type.toUpperCase()}: {config.dataFields?.primaryY1?.replace(/_/g, ' ')}</span>
+              </div>
+            )}
+            {canRenderSecondary && (
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded" style={{ backgroundColor: secondaryColors[0] }}></div>
+                <span>{config.secondaryChartType?.toUpperCase()}: {config.dataFields?.secondaryY1?.replace(/_/g, ' ')}</span>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // NOVA FUNÇÃO: Renderizar um gráfico individual com configurações específicas
+  const renderSingleChart = (
+    data: any[], 
+    chartType: string, 
+    xField?: string, 
+    yField?: string, 
+    colors: string[] = COLORS,
+    options: {
+      showTopXAxis?: boolean;
+      showBottomXAxis?: boolean;
+      showLeftYAxis?: boolean;
+      showRightYAxis?: boolean;
+      opacity?: number;
+      backgroundColor?: string;
+    } = {}
+  ) => {
+    const {
+      showTopXAxis = false,
+      showBottomXAxis = true,
+      showLeftYAxis = true,
+      showRightYAxis = false,
+      opacity = 1,
+      backgroundColor = 'white'
+    } = options;
+
+    const commonProps = {
+      data,
+      margin: { top: 40, right: 60, left: 60, bottom: 40 },
+    };
+
+    const xAxisProps = {
+      dataKey: xField,
+      fontSize: 11,
+      angle: -45,
+      textAnchor: "end" as const,
+      height: 50,
+      axisLine: true,
+      tickLine: true,
+    };
+
+    const yAxisProps = {
+      fontSize: 11,
+      axisLine: true,
+      tickLine: true,
+    };
+
+    switch (chartType) {
+      case 'bar':
+        return (
+          <BarChart {...commonProps}>
+            {backgroundColor !== 'transparent' && (
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" opacity={0.3} />
+            )}
+            
+            {showBottomXAxis && (
+              <XAxis {...xAxisProps} orientation="bottom" />
+            )}
+            {showTopXAxis && (
+              <XAxis {...xAxisProps} orientation="top" />
+            )}
+            {showLeftYAxis && (
+              <YAxis {...yAxisProps} orientation="left" />
+            )}
+            {showRightYAxis && (
+              <YAxis {...yAxisProps} orientation="right" />
+            )}
+            
+            <Tooltip 
+              content={<CustomTooltip />}
+              wrapperStyle={{ backgroundColor: 'rgba(255,255,255,0.95)' }}
+            />
+            
+            {yField && (
+              <Bar
+                dataKey={yField}
+                name={yField.replace(/_/g, ' ')}
+                fill={colors[0]}
+                fillOpacity={opacity}
+                stroke={colors[0]}
+                strokeWidth={1}
+              />
+            )}
+          </BarChart>
+        );
+
+      case 'line':
+        return (
+          <LineChart {...commonProps}>
+            {backgroundColor !== 'transparent' && (
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" opacity={0.3} />
+            )}
+            
+            {showBottomXAxis && (
+              <XAxis {...xAxisProps} orientation="bottom" />
+            )}
+            {showTopXAxis && (
+              <XAxis {...xAxisProps} orientation="top" />
+            )}
+            {showLeftYAxis && (
+              <YAxis {...yAxisProps} orientation="left" />
+            )}
+            {showRightYAxis && (
+              <YAxis {...yAxisProps} orientation="right" />
+            )}
+            
+            <Tooltip 
+              content={<CustomTooltip />}
+              wrapperStyle={{ backgroundColor: 'rgba(255,255,255,0.95)' }}
+            />
+            
+            {yField && (
+              <Line
+                type="monotone"
+                dataKey={yField}
+                name={yField.replace(/_/g, ' ')}
+                stroke={colors[0]}
+                strokeWidth={3}
+                strokeOpacity={opacity}
+                dot={{ r: 4, fill: colors[0], fillOpacity: opacity }}
+                activeDot={{ r: 6, fill: colors[0] }}
+              />
+            )}
+          </LineChart>
+        );
+
+      case 'area':
+        return (
+          <AreaChart {...commonProps}>
+            {backgroundColor !== 'transparent' && (
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" opacity={0.3} />
+            )}
+            
+            {showBottomXAxis && (
+              <XAxis {...xAxisProps} orientation="bottom" />
+            )}
+            {showTopXAxis && (
+              <XAxis {...xAxisProps} orientation="top" />
+            )}
+            {showLeftYAxis && (
+              <YAxis {...yAxisProps} orientation="left" />
+            )}
+            {showRightYAxis && (
+              <YAxis {...yAxisProps} orientation="right" />
+            )}
+            
+            <Tooltip 
+              content={<CustomTooltip />}
+              wrapperStyle={{ backgroundColor: 'rgba(255,255,255,0.95)' }}
+            />
+            
+            {yField && (
+              <Area
+                type="monotone"
+                dataKey={yField}
+                name={yField.replace(/_/g, ' ')}
+                fill={colors[0]}
+                fillOpacity={opacity * 0.6}
+                stroke={colors[0]}
+                strokeWidth={2}
+                strokeOpacity={opacity}
+              />
+            )}
+          </AreaChart>
+        );
+
+      default:
+        return null;
+    }
+  };
+
+  const renderMainChart = () => {
     if (isLoading) {
       return (
         <div className="h-full flex items-center justify-center text-gray-400">
@@ -284,13 +561,13 @@ export default function ChartPreview({
       );
     }
 
-    if (!canRenderChart) {
+    if (!canRenderMainChart) {
       return (
         <div className="h-full flex items-center justify-center text-gray-400">
           <div className="text-center">
             <p className="text-lg font-medium">No data to display</p>
             <p className="text-sm mt-1">
-              {!hasData 
+              {!hasMainData
                 ? 'Load data first by clicking "Refresh Data"'
                 : 'Configure your chart fields to see a preview'
               }
@@ -300,27 +577,16 @@ export default function ChartPreview({
       );
     }
 
+    // NOVA LÓGICA: Se é composto, renderizar gráficos sobrepostos
+    if (config.isComposed) {
+      return renderOverlaidCharts();
+    }
+
+    // Gráficos simples (código existente)
     const chartColors = config.config.colors || COLORS;
     const commonProps = {
-      data: processedData,
-      margin: { top: 20, right: 30, left: 20, bottom: 20 },
-    };
-
-    // Custom tooltip for better temporal data display
-    const CustomTooltip = ({ active, payload, label }: any) => {
-      if (active && payload && payload.length) {
-        return (
-          <div className="bg-white p-3 border border-gray-200 rounded-lg shadow-lg">
-            <p className="font-medium text-gray-900">{label}</p>
-            {payload.map((entry: any, index: number) => (
-              <p key={index} style={{ color: entry.color }}>
-                {entry.name}: {typeof entry.value === 'number' ? entry.value.toLocaleString() : entry.value}
-              </p>
-            ))}
-          </div>
-        );
-      }
-      return null;
+      data: processedMainData,
+      margin: { top: 20, right: 30, left: 20, bottom: 60 },
     };
 
     switch (config.chart_type) {
@@ -328,27 +594,23 @@ export default function ChartPreview({
         return (
           <ResponsiveContainer width="100%" height={400}>
             <BarChart {...commonProps}>
-              {config.config.showGrid && <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />}
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
               <XAxis
-                dataKey={xAxisField?.field.id}
-                label={config.config.xAxisLabel ? { value: config.config.xAxisLabel, position: 'insideBottom', offset: -10 } : undefined}
+                dataKey={config.dataFields?.x}
+                fontSize={12}
                 angle={-45}
                 textAnchor="end"
                 height={60}
               />
-              <YAxis
-                label={config.config.yAxisLabel ? { value: config.config.yAxisLabel, angle: -90, position: 'insideLeft' } : undefined}
-              />
+              <YAxis fontSize={12} />
               <Tooltip content={<CustomTooltip />} />
-              {config.config.showLegend && <Legend />}
-              {yAxisFields.map((field, index) => (
+              {config.dataFields?.y && (
                 <Bar
-                  key={field.field.id}
-                  dataKey={field.field.id}
-                  name={field.field.name}
-                  fill={chartColors[index % chartColors.length]}
+                  dataKey={config.dataFields.y}
+                  name={config.dataFields.y.replace(/_/g, ' ')}
+                  fill={chartColors[0]}
                 />
-              ))}
+              )}
             </BarChart>
           </ResponsiveContainer>
         );
@@ -357,30 +619,26 @@ export default function ChartPreview({
         return (
           <ResponsiveContainer width="100%" height={400}>
             <LineChart {...commonProps}>
-              {config.config.showGrid && <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />}
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
               <XAxis
-                dataKey={xAxisField?.field.id}
-                label={config.config.xAxisLabel ? { value: config.config.xAxisLabel, position: 'insideBottom', offset: -10 } : undefined}
+                dataKey={config.dataFields?.x}
+                fontSize={12}
                 angle={-45}
                 textAnchor="end"
                 height={60}
               />
-              <YAxis
-                label={config.config.yAxisLabel ? { value: config.config.yAxisLabel, angle: -90, position: 'insideLeft' } : undefined}
-              />
+              <YAxis fontSize={12} />
               <Tooltip content={<CustomTooltip />} />
-              {config.config.showLegend && <Legend />}
-              {yAxisFields.map((field, index) => (
+              {config.dataFields?.y && (
                 <Line
-                  key={field.field.id}
                   type="monotone"
-                  dataKey={field.field.id}
-                  name={field.field.name}
-                  stroke={chartColors[index % chartColors.length]}
+                  dataKey={config.dataFields.y}
+                  name={config.dataFields.y.replace(/_/g, ' ')}
+                  stroke={chartColors[0]}
                   strokeWidth={2}
                   dot={{ r: 4 }}
                 />
-              ))}
+              )}
             </LineChart>
           </ResponsiveContainer>
         );
@@ -389,29 +647,25 @@ export default function ChartPreview({
         return (
           <ResponsiveContainer width="100%" height={400}>
             <AreaChart {...commonProps}>
-              {config.config.showGrid && <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />}
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
               <XAxis
-                dataKey={xAxisField?.field.id}
-                label={config.config.xAxisLabel ? { value: config.config.xAxisLabel, position: 'insideBottom', offset: -10 } : undefined}
+                dataKey={config.dataFields?.x}
+                fontSize={12}
                 angle={-45}
                 textAnchor="end"
                 height={60}
               />
-              <YAxis
-                label={config.config.yAxisLabel ? { value: config.config.yAxisLabel, angle: -90, position: 'insideLeft' } : undefined}
-              />
+              <YAxis fontSize={12} />
               <Tooltip content={<CustomTooltip />} />
-              {config.config.showLegend && <Legend />}
-              {yAxisFields.map((field, index) => (
+              {config.dataFields?.y && (
                 <Area
-                  key={field.field.id}
                   type="monotone"
-                  dataKey={field.field.id}
-                  name={field.field.name}
-                  fill={chartColors[index % chartColors.length]}
-                  stroke={chartColors[index % chartColors.length]}
+                  dataKey={config.dataFields.y}
+                  name={config.dataFields.y.replace(/_/g, ' ')}
+                  fill={chartColors[0]}
+                  stroke={chartColors[0]}
                 />
-              ))}
+              )}
             </AreaChart>
           </ResponsiveContainer>
         );
@@ -421,49 +675,32 @@ export default function ChartPreview({
           <ResponsiveContainer width="100%" height={400}>
             <PieChart>
               <Pie
-                data={processedData}
-                dataKey={valueField?.field.id}
-                nameKey={xAxisField?.field.id}
+                data={processedMainData}
+                dataKey={config.dataFields?.value}
+                nameKey={config.dataFields?.x}
                 cx="50%"
                 cy="50%"
                 outerRadius={150}
                 label={({ name, value }) => `${name}: ${typeof value === 'number' ? value.toLocaleString() : value}`}
               >
-                {processedData.map((_, index) => (
+                {processedMainData.map((_, index) => (
                   <Cell key={`cell-${index}`} fill={chartColors[index % chartColors.length]} />
                 ))}
               </Pie>
               <Tooltip content={<CustomTooltip />} />
-              {config.config.showLegend && <Legend />}
             </PieChart>
           </ResponsiveContainer>
         );
 
       case 'scatter':
-        const xField = xAxisField?.field.id;
-        const yField = yAxisFields[0]?.field.id;
-        
         return (
           <ResponsiveContainer width="100%" height={400}>
             <ScatterChart {...commonProps}>
-              {config.config.showGrid && <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />}
-              <XAxis
-                dataKey={xField}
-                type="number"
-                label={config.config.xAxisLabel ? { value: config.config.xAxisLabel, position: 'insideBottom', offset: -10 } : undefined}
-              />
-              <YAxis
-                dataKey={yField}
-                type="number"
-                label={config.config.yAxisLabel ? { value: config.config.yAxisLabel, angle: -90, position: 'insideLeft' } : undefined}
-              />
-              <Tooltip content={<CustomTooltip />} cursor={{ strokeDasharray: '3 3' }} />
-              {config.config.showLegend && <Legend />}
-              <Scatter
-                name="Data Points"
-                data={processedData}
-                fill={chartColors[0]}
-              />
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+              <XAxis dataKey={config.dataFields?.x} type="number" fontSize={12} />
+              <YAxis dataKey={config.dataFields?.y} type="number" fontSize={12} />
+              <Tooltip content={<CustomTooltip />} />
+              <Scatter name="Data Points" data={processedMainData} fill={chartColors[0]} />
             </ScatterChart>
           </ResponsiveContainer>
         );
@@ -473,21 +710,75 @@ export default function ChartPreview({
     }
   };
 
+  const renderOverlayChart = () => {
+    if (!canRenderOverlay || !config.overlay) return null;
+
+    const overlayColors = config.overlay.config.colors || ['#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
+    const dimensions = getOverlayDimensions();
+    const positionClasses = getOverlayPositionClasses();
+
+    return (
+      <div
+        className={`absolute ${positionClasses} bg-white rounded-lg shadow-lg border border-gray-200 p-2`}
+        style={{ width: dimensions.width, height: dimensions.height }}
+      >
+        {config.overlay.config.title && (
+          <div className="text-xs font-semibold text-gray-700 mb-1 text-center">
+            {config.overlay.config.title}
+          </div>
+        )}
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie
+              data={processedOverlayData}
+              dataKey={config.overlay.dataFields?.value}
+              nameKey={config.overlay.dataFields?.x}
+              cx="50%"
+              cy="50%"
+              outerRadius={50}
+              label={false}
+            >
+              {processedOverlayData.map((_, index) => (
+                <Cell key={`cell-${index}`} fill={overlayColors[index % overlayColors.length]} />
+              ))}
+            </Pie>
+            <Tooltip content={<CustomTooltip />} />
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
+    );
+  };
+
   return (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200 h-full flex flex-col">
       <div className="p-4 border-b border-gray-200 flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-gray-900">
-            {config.config.title || config.name || 'Chart Preview'}
-          </h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-semibold text-gray-900">
+              {config.config.title || config.name || 'Chart Preview'}
+            </h2>
+            {config.isComposed && (
+              <div className="flex items-center gap-1 px-2 py-1 bg-purple-100 text-purple-700 rounded-full text-xs">
+                <Layers className="w-3 h-3" />
+                Overlaid
+              </div>
+            )}
+            {config.overlay?.enabled && (
+              <div className="flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-700 rounded-full text-xs">
+                <Layers className="w-3 h-3" />
+                Overlay
+              </div>
+            )}
+          </div>
           <p className="text-sm text-gray-600 mt-0.5">
-            {processedData.length > 0 ? `${processedData.length} data points` : 'No data'}
+            {processedMainData.length > 0 ? `${processedMainData.length} data points` : 'No data'}
+            {canRenderOverlay && ` • Overlay: ${processedOverlayData.length} points`}
           </p>
         </div>
         <div className="flex gap-2">
           <button
             onClick={exportToPNG}
-            disabled={!canRenderChart || isLoading}
+            disabled={!canRenderMainChart || isLoading}
             className="flex items-center gap-2 px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
             title="Export as PNG"
           >
@@ -496,7 +787,7 @@ export default function ChartPreview({
           </button>
           <button
             onClick={exportToPDF}
-            disabled={!canRenderChart || isLoading}
+            disabled={!canRenderMainChart || isLoading}
             className="flex items-center gap-2 px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
             title="Export as PDF"
           >
@@ -505,9 +796,9 @@ export default function ChartPreview({
           </button>
         </div>
       </div>
-
-      <div ref={chartRef} className="flex-1 p-6 bg-white min-h-[400px]">
-        {renderChart()}
+      <div ref={chartRef} className="flex-1 p-6 bg-white min-h-[400px] relative">
+        {renderMainChart()}
+        {renderOverlayChart()}
       </div>
     </div>
   );

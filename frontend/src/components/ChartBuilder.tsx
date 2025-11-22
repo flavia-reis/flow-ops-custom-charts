@@ -63,6 +63,8 @@ function DroppableAxis({
     },
   });
 
+  console.log(`🎯 DroppableAxis criado: id="${id}", axis="${axis}", fields=${fields.length}`);
+
   return (
     <div
       ref={setNodeRef}
@@ -198,10 +200,18 @@ export default function ChartBuilder({
   const valueFields = config.dataFields?.value ? [config.dataFields.value] : [];
 
   // NOVO: Campos para gráficos compostos (sobrepostos)
-  const primaryXFields = config.dataFields?.primaryY1 ? [config.dataFields.primaryY1] : [];
-  const primaryYFields = config.dataFields?.primaryY1 ? [config.dataFields.primaryY1] : [];
-  const secondaryXFields = config.dataFields?.secondaryY1 ? [config.dataFields.secondaryY1] : [];
-  const secondaryYFields = config.dataFields?.secondaryY1 ? [config.dataFields.secondaryY1] : [];
+const primaryXFields = config.dataFields?.primaryX ? [config.dataFields.primaryX] : [];
+const primaryYFields = config.dataFields?.primaryY ? [config.dataFields.primaryY] : [];
+const secondaryXFields = config.dataFields?.secondaryX ? [config.dataFields.secondaryX] : [];
+const secondaryYFields = config.dataFields?.secondaryY ? [config.dataFields.secondaryY] : [];
+
+console.log('📊 Campos calculados:', {
+  primaryXFields,
+  primaryYFields,
+  secondaryXFields,
+  secondaryYFields,
+  dataFields: config.dataFields
+});
 
   const handleChartTypeChange = (chartType: ChartType) => {
     onConfigChange({

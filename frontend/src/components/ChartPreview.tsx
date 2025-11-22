@@ -64,13 +64,18 @@ export default function ChartPreview({
 }: ChartPreviewProps) {
   const chartRef = useRef<HTMLDivElement>(null);
 
-  // NOVA LÓGICA: Processar dados usando ComposedDataFields
+  // CORRIGIDO: Processar dados baseado no tipo de gráfico
   const processedMainData = useMemo(() => {
     if (!rawData || !config.dataFields) return [];
     
+    if (config.isComposed) {
+      // Para gráficos compostos, não processar aqui - será feito no render
+      return [];
+    }
+    
     // Para gráficos simples
     return processSimpleChartData(rawData, config.dataFields, config.chart_type);
-  }, [rawData, config.dataFields, config.chart_type]);
+  }, [rawData, config.dataFields, config.chart_type, config.isComposed]);
 
   // Process data for overlay chart
   const processedOverlayData = useMemo(() => {
@@ -80,9 +85,18 @@ export default function ChartPreview({
     return processSimpleChartData(rawData, config.overlay.dataFields, config.overlay.type);
   }, [rawData, config.overlay]);
 
-  // NOVA FUNÇÃO: Processar dados para gráficos simples
+  // CORRIGIDA: Função para processar dados
   function processSimpleChartData(rawData: RawDataResponse | null, dataFields: any, chartType: string) {
+    console.log('🔄 processSimpleChartData DEBUG:', {
+      hasRawData: !!rawData,
+      itemsCount: rawData?.items?.length || 0,
+      dataFields,
+      chartType,
+      firstItem: rawData?.items?.[0]
+    });
+
     if (!rawData || !rawData.items || !rawData.items.length) {
+      console.log('❌ No raw data available');
       return [];
     }
 
@@ -90,7 +104,26 @@ export default function ChartPreview({
     const yField = dataFields.y;
     const valueField = dataFields.value;
 
-    if (!xField && !valueField) return [];
+    console.log('📋 Fields extracted:', { xField, yField, valueField });
+
+    if (!xField && !valueField) {
+      console.log('❌ No valid fields found');
+      return [];
+    }
+
+    // Vamos ver uma amostra dos dados reais
+    console.log('📊 Sample data:', {
+      sampleItem: rawData.items[0],
+      xFieldValue: rawData.items[0]?.[xField],
+      yFieldValue: rawData.items[0]?.[yField],
+      availableKeys: Object.keys(rawData.items[0] || {})
+    });
+
+    // Para gráficos não-pie, precisamos de X e Y
+    if (chartType !== 'pie' && (!xField || !yField)) {
+      console.log('❌ Missing X or Y field for non-pie chart');
+      return [];
+    }
 
     // Check if we're dealing with temporal data
     const isTemporalData = xField && (
@@ -165,8 +198,8 @@ export default function ChartPreview({
       });
     }
 
-    // For non-temporal data, group by x-axis value
-    if (xField) {
+    // CORRIGIDO: Para dados não-temporais, processar diretamente
+    if (xField && yField) {
       const grouped = rawData.items.reduce((acc, item) => {
         const key = item[xField] || 'Unknown';
         if (!acc[key]) {
@@ -186,7 +219,14 @@ export default function ChartPreview({
         return acc;
       }, {} as Record<string, any>);
 
-      return Object.values(grouped);
+      const result = Object.values(grouped);
+      console.log('✅ Processed data:', {
+        totalItems: result.length,
+        firstItem: result[0],
+        lastItem: result[result.length - 1]
+      });
+      
+      return result;
     }
 
     return [];
@@ -220,41 +260,6 @@ export default function ChartPreview({
     pdf.save(`${config.name || 'chart'}-${Date.now()}.pdf`);
   };
 
-  // NOVA LÓGICA: Verificar se pode renderizar
-  const hasMainData = processedMainData.length > 0;
-  const canRenderMainChart = hasMainData && (
-  (config.chart_type === 'pie' && config.dataFields?.value) ||
-  (config.chart_type !== 'pie' && !config.isComposed && config.dataFields?.x && config.dataFields?.y) ||
-  (config.isComposed && (
-    (config.dataFields?.primaryY1 && config.dataFields?.primaryY1) ||
-    (config.dataFields?.secondaryY1 && config.dataFields?.secondaryY1)
-  ))
-);
-
-  const hasOverlayData = processedOverlayData.length > 0;
-  const canRenderOverlay = config.overlay?.enabled && hasOverlayData;
-
-  // Get overlay dimensions based on size
-  const getOverlayDimensions = () => {
-    switch (config.overlay?.size) {
-      case 'small': return { width: 200, height: 150 };
-      case 'medium': return { width: 300, height: 200 };
-      case 'large': return { width: 400, height: 250 };
-      default: return { width: 200, height: 150 };
-    }
-  };
-
-  // Get overlay position classes
-  const getOverlayPositionClasses = () => {
-    switch (config.overlay?.position) {
-      case 'top-left': return 'top-4 left-4';
-      case 'top-right': return 'top-4 right-4';
-      case 'bottom-left': return 'bottom-4 left-4';
-      case 'bottom-right': return 'bottom-4 right-4';
-      default: return 'top-4 right-4';
-    }
-  };
-
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
       return (
@@ -271,285 +276,14 @@ export default function ChartPreview({
     return null;
   };
 
-  // NOVA FUNÇÃO: Renderizar gráficos sobrepostos independentes
-  const renderOverlaidCharts = () => {
-    if (!config.isComposed) return null;
-
-    const chartColors = config.config.colors || COLORS;
-    const secondaryColors = ['#8b5cf6', '#ec4899', '#14b8a6', '#f97316']; // Cores diferentes para o segundo gráfico
-
-    // CORRIGIDO: Dados para o gráfico primário
-    const primaryData = processSimpleChartData(rawData, {
-      x: config.dataFields?.primaryY1,  // CORRIGIDO
-      y: config.dataFields?.primaryY1,  // CORRIGIDO
-    }, config.chart_type);
-
-    // CORRIGIDO: Dados para o gráfico secundário
-    const secondaryData = processSimpleChartData(rawData, {
-      x: config.dataFields?.secondaryY1, // CORRIGIDO
-      y: config.dataFields?.secondaryY1, // CORRIGIDO
-    }, config.secondaryChartType || 'line');
-
-    // Verificar se temos dados suficientes para renderizar
-    const canRenderPrimary = config.dataFields?.primaryY1 && config.dataFields?.primaryY1 && primaryData.length > 0;
-    const canRenderSecondary = config.dataFields?.secondaryY1 && config.dataFields?.secondaryY1 && secondaryData.length > 0;
-
-    if (!canRenderPrimary && !canRenderSecondary) {
-      return (
-        <div className="h-full flex items-center justify-center text-gray-400">
-          <div className="text-center">
-            <p className="text-lg font-medium">Configure overlaid charts</p>
-            <p className="text-sm mt-1">
-              Drag fields to both Primary and Secondary chart areas to see overlaid visualization
-            </p>
-            <div className="text-xs mt-2 text-gray-500">
-              <p>Primary: {config.dataFields?.primaryY1 ? '✅' : '❌'} X-Axis, {config.dataFields?.primaryY1 ? '✅' : '❌'} Y-Axis</p>
-              <p>Secondary: {config.dataFields?.secondaryY1 ? '✅' : '❌'} X-Axis, {config.dataFields?.secondaryY1 ? '✅' : '❌'} Y-Axis</p>
-            </div>
-          </div>
-        </div>
-      );
-    }
-
-    return (
-      <div className="relative w-full h-[400px]">
-        {/* Gráfico Primário (fundo) */}
-        {canRenderPrimary && (
-          <div className="absolute inset-0 z-10">
-            <ResponsiveContainer width="100%" height="100%">
-              {renderSingleChart(
-                primaryData, 
-                config.chart_type, 
-                config.dataFields?.primaryY1,
-                config.dataFields?.primaryY1,
-                chartColors,
-                {
-                  showTopXAxis: false,
-                  showBottomXAxis: true,
-                  showLeftYAxis: true,
-                  showRightYAxis: false,
-                  opacity: 0.8
-                }
-              )}
-            </ResponsiveContainer>
-          </div>
-        )}
-
-        {/* Gráfico Secundário (frente) */}
-        {canRenderSecondary && (
-          <div className="absolute inset-0 z-20">
-            <ResponsiveContainer width="100%" height="100%">
-              {renderSingleChart(
-                secondaryData, 
-                config.secondaryChartType || 'line', 
-                config.dataFields?.secondaryY1,
-                config.dataFields?.secondaryY1,
-                secondaryColors,
-                {
-                  showTopXAxis: true,
-                  showBottomXAxis: false,
-                  showLeftYAxis: false,
-                  showRightYAxis: true,
-                  opacity: 0.7,
-                  backgroundColor: 'transparent'
-                }
-              )}
-            </ResponsiveContainer>
-          </div>
-        )}
-
-        {/* Legendas customizadas */}
-        {(canRenderPrimary || canRenderSecondary) && (
-          <div className="absolute top-2 left-2 z-30 bg-white/90 rounded p-2 text-xs">
-            {canRenderPrimary && (
-              <div className="flex items-center gap-2 mb-1">
-                <div className="w-3 h-3 rounded" style={{ backgroundColor: chartColors[0] }}></div>
-                <span>{config.chart_type.toUpperCase()}: {config.dataFields?.primaryY1?.replace(/_/g, ' ')}</span>
-              </div>
-            )}
-            {canRenderSecondary && (
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded" style={{ backgroundColor: secondaryColors[0] }}></div>
-                <span>{config.secondaryChartType?.toUpperCase()}: {config.dataFields?.secondaryY1?.replace(/_/g, ' ')}</span>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  // NOVA FUNÇÃO: Renderizar um gráfico individual com configurações específicas
-  const renderSingleChart = (
-    data: any[], 
-    chartType: string, 
-    xField?: string, 
-    yField?: string, 
-    colors: string[] = COLORS,
-    options: {
-      showTopXAxis?: boolean;
-      showBottomXAxis?: boolean;
-      showLeftYAxis?: boolean;
-      showRightYAxis?: boolean;
-      opacity?: number;
-      backgroundColor?: string;
-    } = {}
-  ) => {
-    const {
-      showTopXAxis = false,
-      showBottomXAxis = true,
-      showLeftYAxis = true,
-      showRightYAxis = false,
-      opacity = 1,
-      backgroundColor = 'white'
-    } = options;
-
-    const commonProps = {
-      data,
-      margin: { top: 40, right: 60, left: 60, bottom: 40 },
-    };
-
-    const xAxisProps = {
-      dataKey: xField,
-      fontSize: 11,
-      angle: -45,
-      textAnchor: "end" as const,
-      height: 50,
-      axisLine: true,
-      tickLine: true,
-    };
-
-    const yAxisProps = {
-      fontSize: 11,
-      axisLine: true,
-      tickLine: true,
-    };
-
-    switch (chartType) {
-      case 'bar':
-        return (
-          <BarChart {...commonProps}>
-            {backgroundColor !== 'transparent' && (
-              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" opacity={0.3} />
-            )}
-            
-            {showBottomXAxis && (
-              <XAxis {...xAxisProps} orientation="bottom" />
-            )}
-            {showTopXAxis && (
-              <XAxis {...xAxisProps} orientation="top" />
-            )}
-            {showLeftYAxis && (
-              <YAxis {...yAxisProps} orientation="left" />
-            )}
-            {showRightYAxis && (
-              <YAxis {...yAxisProps} orientation="right" />
-            )}
-            
-            <Tooltip 
-              content={<CustomTooltip />}
-              wrapperStyle={{ backgroundColor: 'rgba(255,255,255,0.95)' }}
-            />
-            
-            {yField && (
-              <Bar
-                dataKey={yField}
-                name={yField.replace(/_/g, ' ')}
-                fill={colors[0]}
-                fillOpacity={opacity}
-                stroke={colors[0]}
-                strokeWidth={1}
-              />
-            )}
-          </BarChart>
-        );
-
-      case 'line':
-        return (
-          <LineChart {...commonProps}>
-            {backgroundColor !== 'transparent' && (
-              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" opacity={0.3} />
-            )}
-            
-            {showBottomXAxis && (
-              <XAxis {...xAxisProps} orientation="bottom" />
-            )}
-            {showTopXAxis && (
-              <XAxis {...xAxisProps} orientation="top" />
-            )}
-            {showLeftYAxis && (
-              <YAxis {...yAxisProps} orientation="left" />
-            )}
-            {showRightYAxis && (
-              <YAxis {...yAxisProps} orientation="right" />
-            )}
-            
-            <Tooltip 
-              content={<CustomTooltip />}
-              wrapperStyle={{ backgroundColor: 'rgba(255,255,255,0.95)' }}
-            />
-            
-            {yField && (
-              <Line
-                type="monotone"
-                dataKey={yField}
-                name={yField.replace(/_/g, ' ')}
-                stroke={colors[0]}
-                strokeWidth={3}
-                strokeOpacity={opacity}
-                dot={{ r: 4, fill: colors[0], fillOpacity: opacity }}
-                activeDot={{ r: 6, fill: colors[0] }}
-              />
-            )}
-          </LineChart>
-        );
-
-      case 'area':
-        return (
-          <AreaChart {...commonProps}>
-            {backgroundColor !== 'transparent' && (
-              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" opacity={0.3} />
-            )}
-            
-            {showBottomXAxis && (
-              <XAxis {...xAxisProps} orientation="bottom" />
-            )}
-            {showTopXAxis && (
-              <XAxis {...xAxisProps} orientation="top" />
-            )}
-            {showLeftYAxis && (
-              <YAxis {...yAxisProps} orientation="left" />
-            )}
-            {showRightYAxis && (
-              <YAxis {...yAxisProps} orientation="right" />
-            )}
-            
-            <Tooltip 
-              content={<CustomTooltip />}
-              wrapperStyle={{ backgroundColor: 'rgba(255,255,255,0.95)' }}
-            />
-            
-            {yField && (
-              <Area
-                type="monotone"
-                dataKey={yField}
-                name={yField.replace(/_/g, ' ')}
-                fill={colors[0]}
-                fillOpacity={opacity * 0.6}
-                stroke={colors[0]}
-                strokeWidth={2}
-                strokeOpacity={opacity}
-              />
-            )}
-          </AreaChart>
-        );
-
-      default:
-        return null;
-    }
-  };
-
   const renderMainChart = () => {
+    console.log('🏗️ renderMainChart called:', {
+      isLoading,
+      hasRawData: !!rawData,
+      isComposed: config.isComposed,
+      dataFields: config.dataFields
+    });
+
     if (isLoading) {
       return (
         <div className="h-full flex items-center justify-center text-gray-400">
@@ -561,39 +295,275 @@ export default function ChartPreview({
       );
     }
 
-    if (!canRenderMainChart) {
+    if (!rawData || !rawData.items || rawData.items.length === 0) {
       return (
         <div className="h-full flex items-center justify-center text-gray-400">
           <div className="text-center">
-            <p className="text-lg font-medium">No data to display</p>
-            <p className="text-sm mt-1">
-              {!hasMainData
-                ? 'Load data first by clicking "Refresh Data"'
-                : 'Configure your chart fields to see a preview'
-              }
-            </p>
+            <p className="text-lg font-medium">No data available</p>
+            <p className="text-sm mt-1">Load data first by clicking "Refresh Data"</p>
           </div>
         </div>
       );
     }
 
-    // NOVA LÓGICA: Se é composto, renderizar gráficos sobrepostos
+    
+    // CORRIGIDO: Gráficos compostos
     if (config.isComposed) {
-      return renderOverlaidCharts();
+      console.log('🎨 Rendering composed chart with fields:', config.dataFields);
+      
+      // Verificar se temos pelo menos um gráfico configurado
+      const hasPrimaryChart = config.dataFields?.primaryX && config.dataFields?.primaryY;
+      const hasSecondaryChart = config.dataFields?.secondaryX && config.dataFields?.secondaryY;
+      
+      console.log('📊 Chart availability:', { hasPrimaryChart, hasSecondaryChart });
+      
+      if (!hasPrimaryChart && !hasSecondaryChart) {
+        return (
+          <div className="h-full flex items-center justify-center text-gray-400">
+            <div className="text-center">
+              <p className="text-lg font-medium">Configure Overlaid Charts</p>
+              <p className="text-sm mt-1">Drag fields to both Primary and Secondary chart areas</p>
+              <div className="text-xs mt-2 text-gray-500">
+                <p>Primary: {config.dataFields?.primaryX ? '✅' : '❌'} X-Axis, {config.dataFields?.primaryY ? '✅' : '❌'} Y-Axis</p>
+                <p>Secondary: {config.dataFields?.secondaryX ? '✅' : '❌'} X-Axis, {config.dataFields?.secondaryY ? '✅' : '❌'} Y-Axis</p>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      // CORRIGIDO: Processar dados para cada gráfico
+      const primaryData = hasPrimaryChart && config.dataFields?.primaryX && config.dataFields?.primaryY ? 
+        processSimpleChartData(rawData, {
+          x: config.dataFields.primaryX,
+          y: config.dataFields.primaryY,
+        }, config.chart_type) : [];
+
+      const secondaryData = hasSecondaryChart && config.dataFields?.secondaryX && config.dataFields?.secondaryY ? 
+        processSimpleChartData(rawData, {
+          x: config.dataFields.secondaryX,
+          y: config.dataFields.secondaryY,
+        }, config.secondaryChartType || 'line') : [];
+
+      console.log('📈 Processed data:', { 
+        primaryData: primaryData.length, 
+        secondaryData: secondaryData.length 
+      });
+
+      // NOVO: Renderizar gráficos sobrepostos
+      const chartColors = config.config.colors || COLORS;
+      const secondaryColors = ['#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
+      
+      return (
+        <div className="relative w-full h-[400px]">
+          {/* Gráfico Primário (fundo) */}
+          {hasPrimaryChart && primaryData.length > 0 && config.dataFields?.primaryX && config.dataFields?.primaryY && (
+            <div className="absolute inset-0 z-10">
+              <ResponsiveContainer width="100%" height="100%">
+                {config.chart_type === 'bar' && (
+                  <BarChart
+                    data={primaryData}
+                    margin={{ top: 40, right: 60, left: 60, bottom: 40 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" opacity={0.3} />
+                    <XAxis 
+                      dataKey={config.dataFields.primaryX}
+                      fontSize={11}
+                      angle={-45}
+                      textAnchor="end"
+                      height={50}
+                      orientation="bottom"
+                    />
+                    <YAxis fontSize={11} orientation="left" />
+                    <Tooltip content={<CustomTooltip />} />
+                    <Bar
+                      dataKey={config.dataFields.primaryY}
+                      name={config.dataFields.primaryY.replace(/_/g, ' ')}
+                      fill={chartColors[0]}
+                      fillOpacity={0.8}
+                    />
+                  </BarChart>
+                )}
+                {config.chart_type === 'line' && (
+                  <LineChart
+                    data={primaryData}
+                    margin={{ top: 40, right: 60, left: 60, bottom: 40 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" opacity={0.3} />
+                    <XAxis 
+                      dataKey={config.dataFields.primaryX}
+                      fontSize={11}
+                      angle={-45}
+                      textAnchor="end"
+                      height={50}
+                      orientation="bottom"
+                    />
+                    <YAxis fontSize={11} orientation="left" />
+                    <Tooltip content={<CustomTooltip />} />
+                    <Line
+                      type="monotone"
+                      dataKey={config.dataFields.primaryY}
+                      name={config.dataFields.primaryY.replace(/_/g, ' ')}
+                      stroke={chartColors[0]}
+                      strokeWidth={3}
+                      dot={{ r: 4 }}
+                    />
+                  </LineChart>
+                )}
+                {config.chart_type === 'area' && (
+                  <AreaChart
+                    data={primaryData}
+                    margin={{ top: 40, right: 60, left: 60, bottom: 40 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" opacity={0.3} />
+                    <XAxis 
+                      dataKey={config.dataFields.primaryX}
+                      fontSize={11}
+                      angle={-45}
+                      textAnchor="end"
+                      height={50}
+                      orientation="bottom"
+                    />
+                    <YAxis fontSize={11} orientation="left" />
+                    <Tooltip content={<CustomTooltip />} />
+                    <Area
+                      type="monotone"
+                      dataKey={config.dataFields.primaryY}
+                      name={config.dataFields.primaryY.replace(/_/g, ' ')}
+                      fill={chartColors[0]}
+                      stroke={chartColors[0]}
+                      fillOpacity={0.6}
+                    />
+                  </AreaChart>
+                )}
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          {/* Gráfico Secundário (frente) */}
+          {hasSecondaryChart && secondaryData.length > 0 && config.dataFields?.secondaryX && config.dataFields?.secondaryY && (
+            <div className="absolute inset-0 z-20">
+              <ResponsiveContainer width="100%" height="100%">
+                {config.secondaryChartType === 'bar' && (
+                  <BarChart
+                    data={secondaryData}
+                    margin={{ top: 40, right: 60, left: 60, bottom: 40 }}
+                  >
+                    <XAxis 
+                      dataKey={config.dataFields.secondaryX}
+                      fontSize={11}
+                      angle={-45}
+                      textAnchor="end"
+                      height={50}
+                      orientation="top"
+                    />
+                    <YAxis fontSize={11} orientation="right" />
+                    <Tooltip content={<CustomTooltip />} />
+                    <Bar
+                      dataKey={config.dataFields.secondaryY}
+                      name={config.dataFields.secondaryY.replace(/_/g, ' ')}
+                      fill={secondaryColors[0]}
+                      fillOpacity={0.7}
+                    />
+                  </BarChart>
+                )}
+                {config.secondaryChartType === 'line' && (
+                  <LineChart
+                    data={secondaryData}
+                    margin={{ top: 40, right: 60, left: 60, bottom: 40 }}
+                  >
+                    <XAxis 
+                      dataKey={config.dataFields.secondaryX}
+                      fontSize={11}
+                      angle={-45}
+                      textAnchor="end"
+                      height={50}
+                      orientation="top"
+                    />
+                    <YAxis fontSize={11} orientation="right" />
+                    <Tooltip content={<CustomTooltip />} />
+                    <Line
+                      type="monotone"
+                      dataKey={config.dataFields.secondaryY}
+                      name={config.dataFields.secondaryY.replace(/_/g, ' ')}
+                      stroke={secondaryColors[0]}
+                      strokeWidth={3}
+                      dot={{ r: 4 }}
+                    />
+                  </LineChart>
+                )}
+                {config.secondaryChartType === 'area' && (
+                  <AreaChart
+                    data={secondaryData}
+                    margin={{ top: 40, right: 60, left: 60, bottom: 40 }}
+                  >
+                    <XAxis 
+                      dataKey={config.dataFields.secondaryX}
+                      fontSize={11}
+                      angle={-45}
+                      textAnchor="end"
+                      height={50}
+                      orientation="top"
+                    />
+                    <YAxis fontSize={11} orientation="right" />
+                    <Tooltip content={<CustomTooltip />} />
+                    <Area
+                      type="monotone"
+                      dataKey={config.dataFields.secondaryY}
+                      name={config.dataFields.secondaryY.replace(/_/g, ' ')}
+                      fill={secondaryColors[0]}
+                      stroke={secondaryColors[0]}
+                      fillOpacity={0.6}
+                    />
+                  </AreaChart>
+                )}
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          {/* Legendas */}
+          {(hasPrimaryChart || hasSecondaryChart) && (
+            <div className="absolute top-2 left-2 z-30 bg-white/90 rounded p-2 text-xs">
+              {hasPrimaryChart && primaryData.length > 0 && config.dataFields?.primaryY && (
+                <div className="flex items-center gap-2 mb-1">
+                  <div className="w-3 h-3 rounded" style={{ backgroundColor: chartColors[0] }}></div>
+                  <span>{config.chart_type.toUpperCase()}: {config.dataFields.primaryY.replace(/_/g, ' ')}</span>
+                </div>
+              )}
+              {hasSecondaryChart && secondaryData.length > 0 && config.dataFields?.secondaryY && (
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded" style={{ backgroundColor: secondaryColors[0] }}></div>
+                  <span>{config.secondaryChartType?.toUpperCase()}: {config.dataFields.secondaryY.replace(/_/g, ' ')}</span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      );
     }
 
-    // Gráficos simples (código existente)
+    // CORRIGIDO: Gráficos simples
     const chartColors = config.config.colors || COLORS;
-    const commonProps = {
-      data: processedMainData,
-      margin: { top: 20, right: 30, left: 20, bottom: 60 },
-    };
+    
+    if (processedMainData.length === 0) {
+      return (
+        <div className="h-full flex items-center justify-center text-gray-400">
+          <div className="text-center">
+            <p className="text-lg font-medium">Configure your chart</p>
+            <p className="text-sm mt-1">Drag fields to X-Axis and Y-Axis to create a chart</p>
+          </div>
+        </div>
+      );
+    }
 
     switch (config.chart_type) {
       case 'bar':
         return (
           <ResponsiveContainer width="100%" height={400}>
-            <BarChart {...commonProps}>
+            <BarChart
+              data={processedMainData}
+              margin={{ top: 20, right: 30, left: 20, bottom: 60 }}
+            >
               <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
               <XAxis
                 dataKey={config.dataFields?.x}
@@ -618,7 +588,10 @@ export default function ChartPreview({
       case 'line':
         return (
           <ResponsiveContainer width="100%" height={400}>
-            <LineChart {...commonProps}>
+            <LineChart
+              data={processedMainData}
+              margin={{ top: 20, right: 30, left: 20, bottom: 60 }}
+            >
               <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
               <XAxis
                 dataKey={config.dataFields?.x}
@@ -640,33 +613,6 @@ export default function ChartPreview({
                 />
               )}
             </LineChart>
-          </ResponsiveContainer>
-        );
-
-      case 'area':
-        return (
-          <ResponsiveContainer width="100%" height={400}>
-            <AreaChart {...commonProps}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-              <XAxis
-                dataKey={config.dataFields?.x}
-                fontSize={12}
-                angle={-45}
-                textAnchor="end"
-                height={60}
-              />
-              <YAxis fontSize={12} />
-              <Tooltip content={<CustomTooltip />} />
-              {config.dataFields?.y && (
-                <Area
-                  type="monotone"
-                  dataKey={config.dataFields.y}
-                  name={config.dataFields.y.replace(/_/g, ' ')}
-                  fill={chartColors[0]}
-                  stroke={chartColors[0]}
-                />
-              )}
-            </AreaChart>
           </ResponsiveContainer>
         );
 
@@ -692,28 +638,39 @@ export default function ChartPreview({
           </ResponsiveContainer>
         );
 
-      case 'scatter':
-        return (
-          <ResponsiveContainer width="100%" height={400}>
-            <ScatterChart {...commonProps}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-              <XAxis dataKey={config.dataFields?.x} type="number" fontSize={12} />
-              <YAxis dataKey={config.dataFields?.y} type="number" fontSize={12} />
-              <Tooltip content={<CustomTooltip />} />
-              <Scatter name="Data Points" data={processedMainData} fill={chartColors[0]} />
-            </ScatterChart>
-          </ResponsiveContainer>
-        );
-
       default:
-        return null;
+        return (
+          <div className="h-full flex items-center justify-center text-gray-400">
+            <p>Chart type not supported yet</p>
+          </div>
+        );
     }
   };
 
   const renderOverlayChart = () => {
-    if (!canRenderOverlay || !config.overlay) return null;
+    if (!config.overlay?.enabled || !processedOverlayData.length) return null;
 
     const overlayColors = config.overlay.config.colors || ['#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
+    
+    const getOverlayDimensions = () => {
+      switch (config.overlay?.size) {
+        case 'small': return { width: 200, height: 150 };
+        case 'medium': return { width: 300, height: 200 };
+        case 'large': return { width: 400, height: 250 };
+        default: return { width: 200, height: 150 };
+      }
+    };
+
+    const getOverlayPositionClasses = () => {
+      switch (config.overlay?.position) {
+        case 'top-left': return 'top-4 left-4';
+        case 'top-right': return 'top-4 right-4';
+        case 'bottom-left': return 'bottom-4 left-4';
+        case 'bottom-right': return 'bottom-4 right-4';
+        default: return 'top-4 right-4';
+      }
+    };
+
     const dimensions = getOverlayDimensions();
     const positionClasses = getOverlayPositionClasses();
 
@@ -772,13 +729,13 @@ export default function ChartPreview({
           </div>
           <p className="text-sm text-gray-600 mt-0.5">
             {processedMainData.length > 0 ? `${processedMainData.length} data points` : 'No data'}
-            {canRenderOverlay && ` • Overlay: ${processedOverlayData.length} points`}
+            {config.overlay?.enabled && processedOverlayData.length > 0 && ` • Overlay: ${processedOverlayData.length} points`}
           </p>
         </div>
         <div className="flex gap-2">
           <button
             onClick={exportToPNG}
-            disabled={!canRenderMainChart || isLoading}
+            disabled={isLoading}
             className="flex items-center gap-2 px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
             title="Export as PNG"
           >
@@ -787,7 +744,7 @@ export default function ChartPreview({
           </button>
           <button
             onClick={exportToPDF}
-            disabled={!canRenderMainChart || isLoading}
+            disabled={isLoading}
             className="flex items-center gap-2 px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
             title="Export as PDF"
           >

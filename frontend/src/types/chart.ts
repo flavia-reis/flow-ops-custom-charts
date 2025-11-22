@@ -34,15 +34,18 @@ export interface OverlayChartConfig {
   config: ChartConfig;
 }
 
-// ÚNICA estrutura para campos - mais simples e consistente
+/// ÚNICA estrutura para campos - mais simples e consistente
 export interface ComposedDataFields {
+  // Gráficos simples
   x?: string;
   y?: string;
   value?: string;
-  primaryY1?: string;
-  primaryY2?: string;
-  secondaryY1?: string;
-  secondaryY2?: string;
+  
+  // Gráficos sobrepostos independentes
+  primaryX?: string;   // X-axis do gráfico primário (bottom)
+  primaryY?: string;   // Y-axis do gráfico primário (left)
+  secondaryX?: string; // X-axis do gráfico secundário (top)
+  secondaryY?: string; // Y-axis do gráfico secundário (right)
 }
 
 export interface ChartConfiguration {

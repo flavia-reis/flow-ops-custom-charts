@@ -41,16 +41,16 @@ const sizeOptions = [
   { value: 'large', label: 'Large', dimensions: '400x250' },
 ];
 
-function DroppableOverlayAxis({ 
-  id, 
-  title, 
-  fields, 
-  axis, 
-  onRemoveField 
+function DroppableOverlayAxis({
+  id,
+  title,
+  fields,
+  axis,
+  onRemoveField
 }: {
   id: string;
   title: string;
-  fields: any[];
+  fields: string[]; // CORRIGIDO: agora é array de strings
   axis: 'x' | 'y' | 'value';
   onRemoveField: (fieldId: string, axis: 'x' | 'y' | 'value', isOverlay: boolean) => void;
 }) {
@@ -72,18 +72,16 @@ function DroppableOverlayAxis({
       }`}
     >
       <p className="text-xs font-medium text-gray-700 mb-2">{title}</p>
-      
       <div className="space-y-1">
         {fields.length === 0 && (
           <p className="text-xs text-gray-400 italic py-2 text-center">
             {isOver ? 'Drop here!' : `Drop field for ${title.toLowerCase()}`}
           </p>
         )}
-        
-        {fields.map((item, index) => (
+        {fields.map((fieldName, index) => (
           <DraggableOverlayField
-            key={`overlay-${axis}-${item.field.id}`}
-            item={item}
+            key={`overlay-${axis}-${fieldName}`}
+            fieldName={fieldName} // CORRIGIDO: agora passa apenas o nome
             axis={axis}
             index={index}
             onRemoveField={onRemoveField}
@@ -94,12 +92,13 @@ function DroppableOverlayAxis({
   );
 }
 
-function DraggableOverlayField({ 
-  item, 
+function DraggableOverlayField({
+  fieldName,
   axis,
-  onRemoveField 
+  index,
+  onRemoveField
 }: {
-  item: any;
+  fieldName: string; // CORRIGIDO: agora é apenas string
   axis: 'x' | 'y' | 'value';
   index: number;
   onRemoveField: (fieldId: string, axis: 'x' | 'y' | 'value', isOverlay: boolean) => void;
@@ -111,10 +110,10 @@ function DraggableOverlayField({
     transform,
     isDragging,
   } = useDraggable({
-    id: `overlay-${axis}-${item.field.id}`,
+    id: `overlay-${axis}-${fieldName}`,
     data: {
       type: 'overlay-axis-field',
-      field: item.field,
+      fieldName: fieldName,
       axis: axis,
     },
   });
@@ -123,30 +122,52 @@ function DraggableOverlayField({
     transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
   } : undefined;
 
+  // Função para formatar nome do campo
+  const formatFieldName = (name: string) => {
+    return name.split('_').map(word => 
+      word.charAt(0).toUpperCase() + word.slice(1)
+    ).join(' ');
+  };
+
+  // Inferir tipo do campo baseado no nome
+  const getFieldType = (name: string) => {
+    const lowerName = name.toLowerCase();
+    if (lowerName.includes('size') || lowerName.includes('count') || 
+        lowerName.includes('burn') || lowerName.includes('build')) {
+      return 'number';
+    }
+    if (lowerName.includes('date') || lowerName === 'year' || lowerName === 'month') {
+      return 'date';
+    }
+    return 'string';
+  };
+
+  const fieldType = getFieldType(fieldName);
+
   return (
     <div
       ref={setNodeRef}
       style={style}
       {...listeners}
       {...attributes}
-      className={`flex items-center gap-2 bg-white border rounded px-2 py-1 shadow-sm transition-all text-xs ${
-        isDragging 
-          ? 'border-purple-300 shadow-lg opacity-50' 
+      className={`flex items-center gap-2 bg-white border rounded px-2 py-1 shadow-sm transition-all text-xs cursor-move ${
+        isDragging
+          ? 'border-purple-300 shadow-lg opacity-50'
           : 'border-gray-200 hover:border-gray-300'
       }`}
     >
       <div className={`${
-        item.field.type === 'number' ? 'text-green-600' :
-        item.field.type === 'date' ? 'text-purple-600' :
+        fieldType === 'number' ? 'text-green-600' :
+        fieldType === 'date' ? 'text-purple-600' :
         'text-gray-600'
       }`}>
-        {getFieldIcon(item.field.type)}
+        {getFieldIcon(fieldType)}
       </div>
-      <span className="flex-1 truncate font-medium">{item.field.name}</span>
+      <span className="flex-1 truncate font-medium">{formatFieldName(fieldName)}</span>
       <button
         onClick={(e) => {
           e.stopPropagation();
-          onRemoveField(item.field.id, axis, true);
+          onRemoveField(fieldName, axis, true);
         }}
         className="text-gray-400 hover:text-red-600 transition-colors"
         title="Remove field"
@@ -167,7 +188,7 @@ export default function OverlayChartConfigPanel({
     type: 'pie',
     position: 'top-right',
     size: 'small',
-    data_fields: [],
+    dataFields: {}, // CORRIGIDO: nova estrutura
     config: {
       showLegend: false,
       showGrid: false,
@@ -193,21 +214,25 @@ export default function OverlayChartConfigPanel({
   const showYAxis = overlay.type !== 'pie';
   const showValue = overlay.type === 'pie';
 
-  const xAxisFields = overlay.data_fields.filter(df => df.axis === 'x');
-  const yAxisFields = overlay.data_fields.filter(df => df.axis === 'y');
-  const valueFields = overlay.data_fields.filter(df => df.axis === 'value');
+  // CORRIGIDO: Nova estrutura usando ComposedDataFields
+  const xAxisFields = overlay.dataFields?.x ? [overlay.dataFields.x] : [];
+  const yAxisFields = overlay.dataFields?.y ? [overlay.dataFields.y] : [];
+  const valueFields = overlay.dataFields?.value ? [overlay.dataFields.value] : [];
 
   const handleChartTypeChange = (chartType: ChartType) => {
     updateOverlay({
       type: chartType,
-      // Clear incompatible fields when switching chart types
-      data_fields: overlay.data_fields.filter(df => {
-        if (chartType === 'pie') {
-          return df.axis === 'value';
-        } else {
-          return df.axis !== 'value';
-        }
-      }),
+      // CORRIGIDO: Limpar campos incompatíveis na nova estrutura
+      dataFields: {
+        ...overlay.dataFields,
+        // Se mudando para pie, manter apenas value
+        ...(chartType === 'pie' ? {
+          x: undefined,
+          y: undefined,
+        } : {
+          value: undefined,
+        })
+      },
     });
   };
 
@@ -315,7 +340,6 @@ export default function OverlayChartConfigPanel({
                   onRemoveField={onRemoveField}
                 />
               )}
-
               {showYAxis && (
                 <DroppableOverlayAxis
                   id="overlay-y-axis"
@@ -325,7 +349,6 @@ export default function OverlayChartConfigPanel({
                   onRemoveField={onRemoveField}
                 />
               )}
-
               {showValue && (
                 <DroppableOverlayAxis
                   id="overlay-value-axis"

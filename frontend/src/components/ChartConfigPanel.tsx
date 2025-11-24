@@ -1,162 +1,144 @@
-import { BarChart3, LineChart as LineChartIcon, PieChart as PieChartIcon, Activity, TrendingUp } from 'lucide-react';
-import { ChartType, ChartConfig } from '../types/chart';
+import React from 'react';
+import { Settings, Palette } from 'lucide-react';
+import { ChartConfiguration } from '../types/chart';
 
 interface ChartConfigPanelProps {
-  chartType: ChartType;
-  config: ChartConfig;
-  onChartTypeChange: (type: ChartType) => void;
-  onConfigChange: (config: Partial<ChartConfig>) => void;
+  config: ChartConfiguration;
+  onConfigChange: (config: ChartConfiguration) => void;
 }
 
-const chartTypes: { type: ChartType; label: string; icon: React.ReactNode }[] = [
-  { type: 'bar', label: 'Bar', icon: <BarChart3 className="w-5 h-5" /> },
-  { type: 'line', label: 'Line', icon: <LineChartIcon className="w-5 h-5" /> },
-  { type: 'area', label: 'Area', icon: <Activity className="w-5 h-5" /> },
-  { type: 'pie', label: 'Pie', icon: <PieChartIcon className="w-5 h-5" /> },
-  { type: 'scatter', label: 'Scatter', icon: <TrendingUp className="w-5 h-5" /> },
+const DEFAULT_COLORS = [
+  '#3B82F6', // blue
+  '#10B981', // green
+  '#F59E0B', // amber
+  '#EF4444', // red
+  '#8B5CF6', // violet
+  '#EC4899', // pink
+  '#14B8A6', // teal
+  '#F97316', // orange
 ];
 
-export default function ChartConfigPanel({
-  chartType,
-  config,
-  onChartTypeChange,
-  onConfigChange,
-}: ChartConfigPanelProps) {
+export default function ChartConfigPanel({ config, onConfigChange }: ChartConfigPanelProps) {
+  const handleConfigUpdate = (updates: Partial<ChartConfiguration>) => {
+    onConfigChange({ ...config, ...updates });
+  };
+
+  const handleNestedConfigUpdate = (key: keyof ChartConfiguration['config'], value: any) => {
+    onConfigChange({
+      ...config,
+      config: {
+        ...config.config,
+        [key]: value,
+      },
+    });
+  };
+
+  const handleColorChange = (index: number, color: string) => {
+    const newColors = [...(config.config.colors || DEFAULT_COLORS)];
+    newColors[index] = color;
+    handleNestedConfigUpdate('colors', newColors);
+  };
+
+  const resetColors = () => {
+    handleNestedConfigUpdate('colors', DEFAULT_COLORS);
+  };
+
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 space-y-6">
-      <div>
-        <h3 className="text-sm font-semibold text-gray-900 mb-3">Chart Type</h3>
-        <div className="grid grid-cols-5 gap-2">
-          {chartTypes.map((item) => (
-            <button
-              key={item.type}
-              onClick={() => onChartTypeChange(item.type)}
-              className={`flex flex-col items-center gap-2 p-3 rounded-lg border-2 transition-all ${
-                chartType === item.type
-                  ? 'border-blue-600 bg-blue-50 text-blue-700'
-                  : 'border-gray-200 hover:border-gray-300 text-gray-600'
-              }`}
-            >
-              {item.icon}
-              <span className="text-xs font-medium">{item.label}</span>
-            </button>
-          ))}
+    <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+      {/* Header */}
+      <div className="p-5 border-b border-gray-200 bg-gray-50">
+        <div className="flex items-center gap-2">
+          <Settings className="w-5 h-5 text-blue-600" />
+          <h3 className="text-lg font-semibold text-gray-900">Chart Settings</h3>
         </div>
       </div>
 
-      <div className="space-y-4">
-        <h3 className="text-sm font-semibold text-gray-900">Appearance</h3>
-
+      {/* Content */}
+      <div className="p-5 space-y-6">
+        {/* Chart Name */}
         <div>
-          <label className="block text-xs font-medium text-gray-700 mb-1">
-            Chart Title
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Chart Name
           </label>
           <input
             type="text"
-            value={config.title || ''}
-            onChange={(e) => onConfigChange({ title: e.target.value })}
-            placeholder="Enter chart title"
-            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            value={config.name}
+            onChange={(e) => handleConfigUpdate({ name: e.target.value })}
+            placeholder="My Chart"
+            className="w-full px-4 py-2.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
           />
+          <p className="text-xs text-gray-500 mt-1.5">
+            This name will appear in the chart header
+          </p>
         </div>
 
-        {chartType !== 'pie' && (
-          <>
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">
-                X-Axis Label
-              </label>
-              <input
-                type="text"
-                value={config.xAxisLabel || ''}
-                onChange={(e) => onConfigChange({ xAxisLabel: e.target.value })}
-                placeholder="Enter X-axis label"
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
+        {/* Color Palette */}
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Palette className="w-4 h-4 text-blue-600" />
+              <h4 className="text-sm font-semibold text-gray-900">Colors</h4>
             </div>
-
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">
-                Y-Axis Label
-              </label>
-              <input
-                type="text"
-                value={config.yAxisLabel || ''}
-                onChange={(e) => onConfigChange({ yAxisLabel: e.target.value })}
-                placeholder="Enter Y-axis label"
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
-            </div>
-          </>
-        )}
-
-        <div className="flex items-center justify-between">
-          <label className="text-xs font-medium text-gray-700">Show Legend</label>
-          <button
-            onClick={() => onConfigChange({ showLegend: !config.showLegend })}
-            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-              config.showLegend ? 'bg-blue-600' : 'bg-gray-300'
-            }`}
-          >
-            <span
-              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                config.showLegend ? 'translate-x-6' : 'translate-x-1'
-              }`}
-            />
-          </button>
-        </div>
-
-        {chartType !== 'pie' && (
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-medium text-gray-700">Show Grid</label>
             <button
-              onClick={() => onConfigChange({ showGrid: !config.showGrid })}
+              onClick={resetColors}
+              className="text-xs text-blue-600 hover:text-blue-700 font-medium transition-colors"
+            >
+              Reset to default
+            </button>
+          </div>
+          
+          <div className="grid grid-cols-4 gap-2.5">
+            {(config.config.colors || DEFAULT_COLORS).map((color, index) => (
+              <div key={index} className="relative group">
+                <label
+                  className="block cursor-pointer"
+                  title={`Color ${index + 1}: ${color}`}
+                >
+                  <input
+                    type="color"
+                    value={color}
+                    onChange={(e) => handleColorChange(index, e.target.value)}
+                    className="sr-only"
+                  />
+                  <div
+                    className="w-full h-11 rounded-lg border-2 border-gray-200 hover:border-blue-400 transition-all shadow-sm hover:shadow"
+                    style={{ backgroundColor: color }}
+                  />
+                </label>
+                <div className="text-[10px] text-center text-gray-500 mt-1 font-mono">
+                  {color.toUpperCase()}
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-gray-500 mt-3">
+            Click on any color to customize
+          </p>
+        </div>
+
+        {/* Visual Options */}
+        <div className="pt-4 border-t border-gray-200 space-y-3">
+          <h4 className="text-sm font-semibold text-gray-900 mb-3">Display Options</h4>
+          
+          <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+            <div>
+              <label className="text-sm font-medium text-gray-700">Legend</label>
+              <p className="text-xs text-gray-500 mt-0.5">Show data labels</p>
+            </div>
+            <button
+              onClick={() => handleNestedConfigUpdate('showLegend', !config.config.showLegend)}
               className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                config.showGrid ? 'bg-blue-600' : 'bg-gray-300'
+                config.config.showLegend ? 'bg-blue-600' : 'bg-gray-300'
               }`}
             >
               <span
                 className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                  config.showGrid ? 'translate-x-6' : 'translate-x-1'
+                  config.config.showLegend ? 'translate-x-6' : 'translate-x-1'
                 }`}
               />
             </button>
           </div>
-        )}
-      </div>
-
-      <div>
-        <h3 className="text-sm font-semibold text-gray-900 mb-3">Color Palette</h3>
-        <div className="grid grid-cols-8 gap-2">
-          {['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'].map(
-            (color) => (
-              <button
-                key={color}
-                onClick={() => {
-                  const colors = config.colors || [];
-                  const newColors = colors.includes(color)
-                    ? colors.filter((c) => c !== color)
-                    : [...colors, color];
-                  onConfigChange({ colors: newColors.length > 0 ? newColors : undefined });
-                }}
-                className={`w-8 h-8 rounded-lg border-2 transition-all ${
-                  config.colors?.includes(color)
-                    ? 'border-gray-900 scale-110'
-                    : 'border-gray-300 hover:border-gray-400'
-                }`}
-                style={{ backgroundColor: color }}
-              />
-            )
-          )}
         </div>
-        {config.colors && config.colors.length > 0 && (
-          <button
-            onClick={() => onConfigChange({ colors: undefined })}
-            className="text-xs text-blue-600 hover:text-blue-700 mt-2"
-          >
-            Reset to default colors
-          </button>
-        )}
       </div>
     </div>
   );

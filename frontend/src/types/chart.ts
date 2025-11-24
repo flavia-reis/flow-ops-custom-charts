@@ -7,11 +7,7 @@ export interface DataField {
   value?: string;
 }
 
-export interface ChartDataField {
-  field: DataField;
-  axis: 'x' | 'y' | 'value';
-}
-
+// SIMPLIFICADO: Removendo ChartDataField, usando apenas ComposedDataFields
 export interface Filter {
   field: string;
   operator: 'equals' | 'contains' | 'greater' | 'less' | 'between';
@@ -19,12 +15,34 @@ export interface Filter {
 }
 
 export interface ChartConfig {
-  colors?: string[];
-  showLegend?: boolean;
-  showGrid?: boolean;
-  title?: string;
-  xAxisLabel?: string;
-  yAxisLabel?: string;
+  showLegend: boolean;
+  showGrid: boolean;
+  colors: string[];
+  // ❌ REMOVER title, xAxisLabel, yAxisLabel
+}
+
+// Overlay chart configuration
+export interface OverlayChartConfig {
+  enabled: boolean;
+  type: ChartType;
+  position: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
+  size: 'small' | 'medium' | 'large';
+  dataFields: ComposedDataFields; // SIMPLIFICADO
+  config: ChartConfig;
+}
+
+/// ÚNICA estrutura para campos - mais simples e consistente
+export interface ComposedDataFields {
+  // Gráficos simples
+  x?: string;
+  y?: string;
+  value?: string;
+  
+  // Gráficos sobrepostos independentes
+  primaryX?: string;   // X-axis do gráfico primário (bottom)
+  primaryY?: string;   // Y-axis do gráfico primário (left)
+  secondaryX?: string; // X-axis do gráfico secundário (top)
+  secondaryY?: string; // Y-axis do gráfico secundário (right)
 }
 
 export interface ChartConfiguration {
@@ -33,9 +51,66 @@ export interface ChartConfiguration {
   name: string;
   description?: string;
   chart_type: ChartType;
-  data_fields: ChartDataField[];
+  dataFields: ComposedDataFields; // SIMPLIFICADO: apenas uma estrutura
   filters: Filter[];
   config: ChartConfig;
+  overlay?: OverlayChartConfig;
   created_at?: string;
   updated_at?: string;
+  
+  // Propriedades para gráficos compostos
+  isComposed?: boolean;
+  secondaryChartType?: ChartType;
 }
+
+// Types for API integration
+export interface DateRange {
+  start_date: string;
+  end_date: string;
+}
+
+export interface PaginationParams {
+  page: number;
+  items_per_page: number;
+}
+
+export interface ApiStatus {
+  isConnected: boolean;
+  isLoading: boolean;
+  error?: string;
+}
+
+export interface FlowDataItem {
+  project_key?: string;
+  team_name?: string;
+  year?: number;
+  month?: number;
+  burn_team_size?: number | null;
+  build_team_size?: number | null;
+  all_team_size?: number | null;
+  [key: string]: any;
+}
+
+export interface ProcessedChartData {
+  [key: string]: any;
+}
+
+export interface RawDataResponse {
+  items: FlowDataItem[];
+  total_items: number;
+  page: number;
+  items_per_page: number;
+  total_pages?: number;
+}
+
+export interface RawDataParams extends DateRange, PaginationParams {}
+
+export const KNOWN_FIELD_TYPES: Record<string, 'string' | 'number' | 'date'> = {
+  project_key: 'string',
+  team_name: 'string',
+  year: 'number',
+  month: 'number',
+  burn_team_size: 'number',
+  build_team_size: 'number',
+  all_team_size: 'number',
+};

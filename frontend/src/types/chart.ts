@@ -15,13 +15,10 @@ export interface Filter {
 }
 
 export interface ChartConfig {
-  dualYAxis?: boolean;
-  colors?: string[];
-  showLegend?: boolean;
-  showGrid?: boolean;
-  title?: string;
-  xAxisLabel?: string;
-  yAxisLabel?: string;
+  showLegend: boolean;
+  showGrid: boolean;
+  colors: string[];
+  // ❌ REMOVER title, xAxisLabel, yAxisLabel
 }
 
 // Overlay chart configuration

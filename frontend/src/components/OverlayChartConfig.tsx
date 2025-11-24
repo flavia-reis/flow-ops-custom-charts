@@ -238,22 +238,7 @@ export default function OverlayChartConfigPanel({
 
   return (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <Layers className="w-5 h-5 text-purple-600" />
-          <h3 className="text-lg font-semibold text-gray-900">Overlay Chart</h3>
-        </div>
-        <button
-          onClick={toggleOverlay}
-          className={`px-3 py-1 text-sm rounded-lg transition-colors ${
-            overlay.enabled
-              ? 'bg-purple-100 text-purple-700 border border-purple-300'
-              : 'bg-gray-100 text-gray-600 border border-gray-300'
-          }`}
-        >
-          {overlay.enabled ? 'Enabled' : 'Disabled'}
-        </button>
-      </div>
+      
 
       {overlay.enabled && (
         <div className="space-y-4">

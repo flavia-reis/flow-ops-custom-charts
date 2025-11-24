@@ -16,6 +16,8 @@ import {
   Tooltip,
   Cell,
   ResponsiveContainer,
+  ComposedChart,
+  Legend
 } from 'recharts';
 import { Image as ImageIcon, FileText, Loader, Layers } from 'lucide-react';
 import html2canvas from 'html2canvas';
@@ -306,16 +308,12 @@ export default function ChartPreview({
       );
     }
 
-    
-    // CORRIGIDO: Gráficos compostos
+        // SOLUÇÃO PARA GRÁFICOS COMPOSTOS
     if (config.isComposed) {
       console.log('🎨 Rendering composed chart with fields:', config.dataFields);
       
-      // Verificar se temos pelo menos um gráfico configurado
       const hasPrimaryChart = config.dataFields?.primaryX && config.dataFields?.primaryY;
       const hasSecondaryChart = config.dataFields?.secondaryX && config.dataFields?.secondaryY;
-      
-      console.log('📊 Chart availability:', { hasPrimaryChart, hasSecondaryChart });
       
       if (!hasPrimaryChart && !hasSecondaryChart) {
         return (
@@ -323,84 +321,111 @@ export default function ChartPreview({
             <div className="text-center">
               <p className="text-lg font-medium">Configure Overlaid Charts</p>
               <p className="text-sm mt-1">Drag fields to both Primary and Secondary chart areas</p>
-              <div className="text-xs mt-2 text-gray-500">
-                <p>Primary: {config.dataFields?.primaryX ? '✅' : '❌'} X-Axis, {config.dataFields?.primaryY ? '✅' : '❌'} Y-Axis</p>
-                <p>Secondary: {config.dataFields?.secondaryX ? '✅' : '❌'} X-Axis, {config.dataFields?.secondaryY ? '✅' : '❌'} Y-Axis</p>
-              </div>
             </div>
           </div>
         );
       }
 
-      // CORRIGIDO: Processar dados para cada gráfico
+      // Combinar dados dos dois gráficos usando o mesmo eixo X
+      const xAxisField = config.dataFields?.primaryX || config.dataFields?.secondaryX || 'x';
+      
+      // Processar dados primários
       const primaryData = hasPrimaryChart && config.dataFields?.primaryX && config.dataFields?.primaryY ? 
         processSimpleChartData(rawData, {
           x: config.dataFields.primaryX,
           y: config.dataFields.primaryY,
         }, config.chart_type) : [];
 
+      // Processar dados secundários
       const secondaryData = hasSecondaryChart && config.dataFields?.secondaryX && config.dataFields?.secondaryY ? 
         processSimpleChartData(rawData, {
           x: config.dataFields.secondaryX,
           y: config.dataFields.secondaryY,
         }, config.secondaryChartType || 'line') : [];
 
-      console.log('📈 Processed data:', { 
-        primaryData: primaryData.length, 
-        secondaryData: secondaryData.length 
-      });
+      // Mesclar dados em um único dataset
+      const combinedData: any[] = [];
+      const dataMap = new Map<string, any>();
 
-      // NOVO: Renderizar gráficos sobrepostos
-      const chartColors = config.config.colors || COLORS;
+      // Adicionar dados primários
+      if (config.dataFields?.primaryX && config.dataFields?.primaryY) {
+        primaryData.forEach(item => {
+          const key = String(item[config.dataFields.primaryX!]);
+          dataMap.set(key, {
+            [xAxisField]: key,
+            [config.dataFields.primaryY!]: item[config.dataFields.primaryY!]
+          });
+        });
+      }
+
+      // Adicionar dados secundários
+      if (config.dataFields?.secondaryX && config.dataFields?.secondaryY) {
+        secondaryData.forEach(item => {
+          const key = String(item[config.dataFields.secondaryX!]);
+          const existing = dataMap.get(key) || { [xAxisField]: key };
+          existing[config.dataFields.secondaryY!] = item[config.dataFields.secondaryY!];
+          dataMap.set(key, existing);
+        });
+      }
+
+      combinedData.push(...Array.from(dataMap.values()));
+
+      const chartColors = config.config?.colors || COLORS;
       const secondaryColors = ['#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
-      
+
       return (
         <div className="relative w-full h-[400px]">
-          {/* Gráfico Primário (fundo) */}
-          {hasPrimaryChart && primaryData.length > 0 && config.dataFields?.primaryX && config.dataFields?.primaryY && (
-            <div className="absolute inset-0 z-10">
-              <ResponsiveContainer width="100%" height="100%">
-                {config.chart_type === 'bar' && (
-                  <BarChart
-                    data={primaryData}
-                    margin={{ top: 40, right: 60, left: 60, bottom: 40 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" opacity={0.3} />
-                    <XAxis 
-                      dataKey={config.dataFields.primaryX}
-                      fontSize={11}
-                      angle={-45}
-                      textAnchor="end"
-                      height={50}
-                      orientation="bottom"
-                    />
-                    <YAxis fontSize={11} orientation="left" />
-                    <Tooltip content={<CustomTooltip />} />
+          <ResponsiveContainer width="100%" height="100%">
+            <ComposedChart
+              data={combinedData}
+              margin={{ top: 20, right: 60, left: 20, bottom: 60 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+              
+              {/* Eixo X compartilhado */}
+              <XAxis 
+                dataKey={xAxisField}
+                fontSize={11}
+                angle={-45}
+                textAnchor="end"
+                height={60}
+              />
+              
+              {/* Eixo Y esquerdo (primário) */}
+              {hasPrimaryChart && (
+                <YAxis 
+                  yAxisId="left"
+                  fontSize={11}
+                  orientation="left"
+                />
+              )}
+              
+              {/* Eixo Y direito (secundário) */}
+              {hasSecondaryChart && (
+                <YAxis 
+                  yAxisId="right"
+                  fontSize={11}
+                  orientation="right"
+                />
+              )}
+              
+              <Tooltip content={<CustomTooltip />} />
+              
+              {/* Gráfico Primário */}
+              {hasPrimaryChart && config.dataFields?.primaryY && (
+                <>
+                  {config.chart_type === 'bar' && (
                     <Bar
+                      yAxisId="left"
                       dataKey={config.dataFields.primaryY}
                       name={config.dataFields.primaryY.replace(/_/g, ' ')}
                       fill={chartColors[0]}
                       fillOpacity={0.8}
                     />
-                  </BarChart>
-                )}
-                {config.chart_type === 'line' && (
-                  <LineChart
-                    data={primaryData}
-                    margin={{ top: 40, right: 60, left: 60, bottom: 40 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" opacity={0.3} />
-                    <XAxis 
-                      dataKey={config.dataFields.primaryX}
-                      fontSize={11}
-                      angle={-45}
-                      textAnchor="end"
-                      height={50}
-                      orientation="bottom"
-                    />
-                    <YAxis fontSize={11} orientation="left" />
-                    <Tooltip content={<CustomTooltip />} />
+                  )}
+                  {config.chart_type === 'line' && (
                     <Line
+                      yAxisId="left"
                       type="monotone"
                       dataKey={config.dataFields.primaryY}
                       name={config.dataFields.primaryY.replace(/_/g, ' ')}
@@ -408,25 +433,10 @@ export default function ChartPreview({
                       strokeWidth={3}
                       dot={{ r: 4 }}
                     />
-                  </LineChart>
-                )}
-                {config.chart_type === 'area' && (
-                  <AreaChart
-                    data={primaryData}
-                    margin={{ top: 40, right: 60, left: 60, bottom: 40 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" opacity={0.3} />
-                    <XAxis 
-                      dataKey={config.dataFields.primaryX}
-                      fontSize={11}
-                      angle={-45}
-                      textAnchor="end"
-                      height={50}
-                      orientation="bottom"
-                    />
-                    <YAxis fontSize={11} orientation="left" />
-                    <Tooltip content={<CustomTooltip />} />
+                  )}
+                  {config.chart_type === 'area' && (
                     <Area
+                      yAxisId="left"
                       type="monotone"
                       dataKey={config.dataFields.primaryY}
                       name={config.dataFields.primaryY.replace(/_/g, ' ')}
@@ -434,55 +444,25 @@ export default function ChartPreview({
                       stroke={chartColors[0]}
                       fillOpacity={0.6}
                     />
-                  </AreaChart>
-                )}
-              </ResponsiveContainer>
-            </div>
-          )}
+                  )}
+                </>
+              )}
 
-          {/* Gráfico Secundário (frente) */}
-          {hasSecondaryChart && secondaryData.length > 0 && config.dataFields?.secondaryX && config.dataFields?.secondaryY && (
-            <div className="absolute inset-0 z-20">
-              <ResponsiveContainer width="100%" height="100%">
-                {config.secondaryChartType === 'bar' && (
-                  <BarChart
-                    data={secondaryData}
-                    margin={{ top: 40, right: 60, left: 60, bottom: 40 }}
-                  >
-                    <XAxis 
-                      dataKey={config.dataFields.secondaryX}
-                      fontSize={11}
-                      angle={-45}
-                      textAnchor="end"
-                      height={50}
-                      orientation="top"
-                    />
-                    <YAxis fontSize={11} orientation="right" />
-                    <Tooltip content={<CustomTooltip />} />
+              {/* Gráfico Secundário */}
+              {hasSecondaryChart && config.dataFields?.secondaryY && (
+                <>
+                  {config.secondaryChartType === 'bar' && (
                     <Bar
+                      yAxisId="right"
                       dataKey={config.dataFields.secondaryY}
                       name={config.dataFields.secondaryY.replace(/_/g, ' ')}
                       fill={secondaryColors[0]}
                       fillOpacity={0.7}
                     />
-                  </BarChart>
-                )}
-                {config.secondaryChartType === 'line' && (
-                  <LineChart
-                    data={secondaryData}
-                    margin={{ top: 40, right: 60, left: 60, bottom: 40 }}
-                  >
-                    <XAxis 
-                      dataKey={config.dataFields.secondaryX}
-                      fontSize={11}
-                      angle={-45}
-                      textAnchor="end"
-                      height={50}
-                      orientation="top"
-                    />
-                    <YAxis fontSize={11} orientation="right" />
-                    <Tooltip content={<CustomTooltip />} />
+                  )}
+                  {config.secondaryChartType === 'line' && (
                     <Line
+                      yAxisId="right"
                       type="monotone"
                       dataKey={config.dataFields.secondaryY}
                       name={config.dataFields.secondaryY.replace(/_/g, ' ')}
@@ -490,54 +470,28 @@ export default function ChartPreview({
                       strokeWidth={3}
                       dot={{ r: 4 }}
                     />
-                  </LineChart>
-                )}
-                {config.secondaryChartType === 'area' && (
-                  <AreaChart
-                    data={secondaryData}
-                    margin={{ top: 40, right: 60, left: 60, bottom: 40 }}
-                  >
-                    <XAxis 
-                      dataKey={config.dataFields.secondaryX}
-                      fontSize={11}
-                      angle={-45}
-                      textAnchor="end"
-                      height={50}
-                      orientation="top"
-                    />
-                    <YAxis fontSize={11} orientation="right" />
-                    <Tooltip content={<CustomTooltip />} />
+                  )}
+                  {config.secondaryChartType === 'area' && (
                     <Area
+                      yAxisId="right"
                       type="monotone"
                       dataKey={config.dataFields.secondaryY}
                       name={config.dataFields.secondaryY.replace(/_/g, ' ')}
                       fill={secondaryColors[0]}
                       stroke={secondaryColors[0]}
-                      fillOpacity={0.6}
+                      fillOpacity={0.5}
                     />
-                  </AreaChart>
-                )}
-              </ResponsiveContainer>
-            </div>
-          )}
+                  )}
+                </>
+              )}
 
-          {/* Legendas */}
-          {(hasPrimaryChart || hasSecondaryChart) && (
-            <div className="absolute top-2 left-2 z-30 bg-white/90 rounded p-2 text-xs">
-              {hasPrimaryChart && primaryData.length > 0 && config.dataFields?.primaryY && (
-                <div className="flex items-center gap-2 mb-1">
-                  <div className="w-3 h-3 rounded" style={{ backgroundColor: chartColors[0] }}></div>
-                  <span>{config.chart_type.toUpperCase()}: {config.dataFields.primaryY.replace(/_/g, ' ')}</span>
-                </div>
-              )}
-              {hasSecondaryChart && secondaryData.length > 0 && config.dataFields?.secondaryY && (
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded" style={{ backgroundColor: secondaryColors[0] }}></div>
-                  <span>{config.secondaryChartType?.toUpperCase()}: {config.dataFields.secondaryY.replace(/_/g, ' ')}</span>
-                </div>
-              )}
-            </div>
-          )}
+              <Legend 
+                verticalAlign="top" 
+                height={36}
+                iconType="line"
+              />
+            </ComposedChart>
+          </ResponsiveContainer>
         </div>
       );
     }
